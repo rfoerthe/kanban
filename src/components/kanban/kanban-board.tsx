@@ -189,7 +189,7 @@ export function KanbanBoard({ board }: KanbanBoardProps) {
         const sourceCol = findColumnByTaskId(activeTaskId);
 
         if (sourceCol) {
-          let targetColumnId = sourceCol.id;
+          const targetColumnId = sourceCol.id;
           let targetPosition = sourceCol.tasks.findIndex((t) => t.id === activeTaskId);
 
           if (overData?.type === "task" && over.id !== activeTaskId) {

@@ -2,7 +2,6 @@
 
 import { LayoutDashboard } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { useBoardStore } from "@/lib/store";
 import { useState } from "react";
 import { CreateBoardDialog } from "@/components/kanban/create-board-dialog";
 
