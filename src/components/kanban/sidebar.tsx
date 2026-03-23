@@ -6,12 +6,21 @@ import { useAuthStore } from "@/lib/auth-store";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from "@/components/ui/dialog";
 import { CreateBoardDialog } from "@/components/kanban/create-board-dialog";
 import {
   LayoutDashboard,
   Plus,
   ChevronLeft,
   Trash2,
+  Loader2,
 } from "lucide-react";
 import type { BoardWithColumns } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -35,14 +44,16 @@ export function Sidebar({
   const { user } = useAuthStore();
   const [showCreateDialog, setShowCreateDialog] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [confirmDeleteBoard, setConfirmDeleteBoard] = useState<{ id: string; title: string } | null>(null);
 
   const isAdmin = user?.role === "ADMIN";
 
-  const handleDelete = async (boardId: string, e: React.MouseEvent) => {
-    e.stopPropagation();
-    setDeletingId(boardId);
+  const handleDelete = async () => {
+    if (!confirmDeleteBoard) return;
+    setDeletingId(confirmDeleteBoard.id);
     try {
-      await deleteBoard(boardId);
+      await deleteBoard(confirmDeleteBoard.id);
+      setConfirmDeleteBoard(null);
     } finally {
       setDeletingId(null);
     }
@@ -105,7 +116,10 @@ export function Sidebar({
                         ? "hover:bg-primary-foreground/20 text-primary-foreground"
                         : "hover:bg-destructive/10 text-muted-foreground hover:text-destructive"
                     )}
-                    onClick={(e) => handleDelete(board.id, e)}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setConfirmDeleteBoard({ id: board.id, title: board.title });
+                    }}
                     disabled={deletingId === board.id}
                   >
                     <Trash2 className="h-3.5 w-3.5" />
@@ -136,6 +150,48 @@ export function Sidebar({
         open={showCreateDialog}
         onOpenChange={setShowCreateDialog}
       />
+
+      <Dialog
+        open={confirmDeleteBoard !== null}
+        onOpenChange={(open) => { if (!open) setConfirmDeleteBoard(null); }}
+      >
+        <DialogContent className="sm:max-w-[400px]">
+          <DialogHeader>
+            <DialogTitle>Delete Board</DialogTitle>
+            <DialogDescription>
+              Are you sure you want to delete{" "}
+              <span className="font-medium text-foreground">
+                {confirmDeleteBoard?.title}
+              </span>
+              ? All columns and tasks will be permanently removed. This cannot
+              be undone.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setConfirmDeleteBoard(null)}
+              disabled={deletingId !== null}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={handleDelete}
+              disabled={deletingId !== null}
+            >
+              {deletingId ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Deleting…
+                </>
+              ) : (
+                "Delete Board"
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </>
   );
 }

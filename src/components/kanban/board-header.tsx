@@ -4,6 +4,14 @@ import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { CreateColumnDialog } from "@/components/kanban/create-column-dialog";
 import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from "@/components/ui/dialog";
+import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
@@ -19,6 +27,7 @@ import {
   UserCircle,
   LogOut,
   Users,
+  Loader2,
 } from "lucide-react";
 import type { BoardWithColumns } from "@/lib/types";
 import { useBoardStore } from "@/lib/store";
@@ -45,8 +54,21 @@ export function BoardHeader({
   const [showEditBoard, setShowEditBoard] = useState(false);
   const [showProfile, setShowProfile] = useState(false);
   const [showUserManagement, setShowUserManagement] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   const isAdmin = user?.role === "ADMIN";
+
+  const handleDeleteBoard = async () => {
+    if (!board) return;
+    setIsDeleting(true);
+    try {
+      await deleteBoard(board.id);
+      setShowDeleteConfirm(false);
+    } finally {
+      setIsDeleting(false);
+    }
+  };
 
   return (
     <>
@@ -95,7 +117,7 @@ export function BoardHeader({
                   </DropdownMenuItem>
                   <DropdownMenuItem
                     className="text-destructive"
-                    onClick={() => deleteBoard(board.id)}
+                    onClick={() => setShowDeleteConfirm(true)}
                   >
                     <Trash2 className="mr-2 h-4 w-4" />
                     Delete Board
@@ -156,6 +178,45 @@ export function BoardHeader({
           onOpenChange={setShowUserManagement}
         />
       )}
+
+      <Dialog open={showDeleteConfirm} onOpenChange={setShowDeleteConfirm}>
+        <DialogContent className="sm:max-w-[400px]">
+          <DialogHeader>
+            <DialogTitle>Delete Board</DialogTitle>
+            <DialogDescription>
+              Are you sure you want to delete{" "}
+              <span className="font-medium text-foreground">
+                {board?.title}
+              </span>
+              ? All columns and tasks will be permanently removed. This cannot
+              be undone.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setShowDeleteConfirm(false)}
+              disabled={isDeleting}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={handleDeleteBoard}
+              disabled={isDeleting}
+            >
+              {isDeleting ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Deleting…
+                </>
+              ) : (
+                "Delete Board"
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </>
   );
 }
