@@ -18,6 +18,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { MoreHorizontal, Plus, Pencil, Trash2, GripVertical } from "lucide-react";
 import { useBoardStore } from "@/lib/store";
+import { useAuthStore } from "@/lib/auth-store";
 import { CreateTaskDialog } from "@/components/kanban/create-task-dialog";
 import { EditColumnDialog } from "@/components/kanban/edit-column-dialog";
 import type { ColumnWithTasks } from "@/lib/types";
@@ -30,8 +31,13 @@ interface KanbanColumnProps {
 
 export function KanbanColumn({ column, isOverlay }: KanbanColumnProps) {
   const { deleteColumn } = useBoardStore();
+  const { user } = useAuthStore();
   const [showCreateTask, setShowCreateTask] = useState(false);
   const [showEditColumn, setShowEditColumn] = useState(false);
+
+  const isAdmin = user?.role === "ADMIN";
+  const isViewer = user?.role === "VIEWER";
+  const canDragColumn = isAdmin;
 
   const {
     attributes,
@@ -43,6 +49,7 @@ export function KanbanColumn({ column, isOverlay }: KanbanColumnProps) {
   } = useSortable({
     id: column.id,
     data: { type: "column", column },
+    disabled: !canDragColumn,
   });
 
   const { setNodeRef: setDroppableRef, isOver } = useDroppable({
@@ -74,13 +81,15 @@ export function KanbanColumn({ column, isOverlay }: KanbanColumnProps) {
       >
         <div className="flex items-center justify-between px-3 py-3">
           <div className="flex items-center gap-2">
-            <button
-              className="cursor-grab text-muted-foreground hover:text-foreground active:cursor-grabbing"
-              {...attributes}
-              {...listeners}
-            >
-              <GripVertical className="h-4 w-4" />
-            </button>
+            {canDragColumn && (
+              <button
+                className="cursor-grab text-muted-foreground hover:text-foreground active:cursor-grabbing"
+                {...attributes}
+                {...listeners}
+              >
+                <GripVertical className="h-4 w-4" />
+              </button>
+            )}
             <h3 className="text-sm font-semibold">{column.title}</h3>
             <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-muted px-1.5 text-xs font-medium text-muted-foreground">
               {column.tasks.length}
@@ -88,33 +97,40 @@ export function KanbanColumn({ column, isOverlay }: KanbanColumnProps) {
           </div>
 
           <div className="flex items-center gap-0.5">
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-7 w-7 text-muted-foreground hover:text-foreground"
-              onClick={() => setShowCreateTask(true)}
-            >
-              <Plus className="h-3.5 w-3.5" />
-            </Button>
+            {!isViewer && (
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-7 w-7 text-muted-foreground hover:text-foreground"
+                onClick={() => setShowCreateTask(true)}
+              >
+                <Plus className="h-3.5 w-3.5" />
+              </Button>
+            )}
 
-            <DropdownMenu>
-              <DropdownMenuTrigger render={<Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-foreground" />}>
-                  <MoreHorizontal className="h-3.5 w-3.5" />
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
-                <DropdownMenuItem onClick={() => setShowEditColumn(true)}>
-                  <Pencil className="mr-2 h-4 w-4" />
-                  Rename
-                </DropdownMenuItem>
-                <DropdownMenuItem
-                  className="text-destructive"
-                  onClick={() => deleteColumn(column.id)}
-                >
-                  <Trash2 className="mr-2 h-4 w-4" />
-                  Delete
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
+            {isAdmin && (
+              <DropdownMenu>
+                <DropdownMenuTrigger render={<Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-foreground" />}>
+                    <MoreHorizontal className="h-3.5 w-3.5" />
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuItem onClick={() => setShowEditColumn(true)}>
+                    <Pencil className="mr-2 h-4 w-4" />
+                    Rename
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    className="text-destructive"
+                    disabled={column.tasks.length > 0}
+                    onClick={() => deleteColumn(column.id)}
+                  >
+                    <Trash2 className="mr-2 h-4 w-4" />
+                    {column.tasks.length > 0
+                      ? "Remove all tasks first"
+                      : "Delete"}
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            )}
           </div>
         </div>
 
@@ -140,17 +156,19 @@ export function KanbanColumn({ column, isOverlay }: KanbanColumnProps) {
           )}
         </div>
 
-        <div className="border-t px-2 py-2">
-          <Button
-            variant="ghost"
-            size="sm"
-            className="w-full justify-start gap-1.5 text-muted-foreground"
-            onClick={() => setShowCreateTask(true)}
-          >
-            <Plus className="h-3.5 w-3.5" />
-            Add Task
-          </Button>
-        </div>
+        {!isViewer && (
+          <div className="border-t px-2 py-2">
+            <Button
+              variant="ghost"
+              size="sm"
+              className="w-full justify-start gap-1.5 text-muted-foreground"
+              onClick={() => setShowCreateTask(true)}
+            >
+              <Plus className="h-3.5 w-3.5" />
+              Add Task
+            </Button>
+          </div>
+        )}
       </div>
 
       <CreateTaskDialog

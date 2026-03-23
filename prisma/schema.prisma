@@ -7,6 +7,16 @@ datasource db {
   provider = "sqlite"
 }
 
+model User {
+  id           String   @id @default(cuid())
+  firstName    String
+  lastName     String
+  username     String   @unique
+  passwordHash String
+  role         String   @default("USER")
+  createdAt    DateTime @default(now())
+}
+
 model Board {
   id        String   @id @default(cuid())
   title     String
@@ -27,15 +37,28 @@ model Column {
 }
 
 model Task {
-  id          String   @id @default(cuid())
+  id          String        @id @default(cuid())
   title       String
   description String?
-  priority    String   @default("MEDIUM")
-  position    Int      @default(0)
+  priority    String        @default("MEDIUM")
+  position    Int           @default(0)
   columnId    String
-  column      Column   @relation(fields: [columnId], references: [id], onDelete: Cascade)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  column      Column        @relation(fields: [columnId], references: [id], onDelete: Cascade)
+  history     TaskHistory[]
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
 
   @@index([columnId, position])
+}
+
+model TaskHistory {
+  id         String   @id @default(cuid())
+  taskId     String
+  task       Task     @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  changeType String
+  detail     String?
+  username   String
+  createdAt  DateTime @default(now())
+
+  @@index([taskId, createdAt])
 }

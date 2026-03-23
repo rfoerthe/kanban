@@ -9,10 +9,52 @@ const adapter = new PrismaLibSql({
 
 const prisma = new PrismaClient({ adapter });
 
+async function hashPassword(password: string): Promise<string> {
+  const salt = crypto.getRandomValues(new Uint8Array(16));
+  const encoder = new TextEncoder();
+  const keyMaterial = await crypto.subtle.importKey(
+    "raw",
+    encoder.encode(password),
+    "PBKDF2",
+    false,
+    ["deriveBits"]
+  );
+
+  const derivedBits = await crypto.subtle.deriveBits(
+    {
+      name: "PBKDF2",
+      salt,
+      iterations: 100000,
+      hash: "SHA-512",
+    },
+    keyMaterial,
+    64 * 8
+  );
+
+  const saltHex = Buffer.from(salt).toString("hex");
+  const hashHex = Buffer.from(derivedBits).toString("hex");
+  return `${saltHex}:${hashHex}`;
+}
+
 async function main() {
   await prisma.task.deleteMany();
   await prisma.column.deleteMany();
   await prisma.board.deleteMany();
+  await prisma.user.deleteMany();
+
+  const passwordHash = await hashPassword("admin_772099");
+
+  await prisma.user.create({
+    data: {
+      firstName: "Kanban",
+      lastName: "Admin",
+      username: "admin",
+      passwordHash,
+      role: "ADMIN",
+    },
+  });
+
+  console.log("Created default admin user (admin / admin_772099)");
 
   const board = await prisma.board.create({
     data: {

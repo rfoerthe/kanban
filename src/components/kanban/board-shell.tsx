@@ -6,6 +6,7 @@ import { Sidebar } from "@/components/kanban/sidebar";
 import { BoardHeader } from "@/components/kanban/board-header";
 import { KanbanBoard } from "@/components/kanban/kanban-board";
 import { EmptyState } from "@/components/kanban/empty-state";
+import { AuthGuard } from "@/components/kanban/auth-guard";
 import type { BoardWithColumns } from "@/lib/types";
 
 export function BoardShell({
@@ -32,30 +33,32 @@ export function BoardShell({
   const activeBoard = getActiveBoard();
 
   return (
-    <div className="flex h-screen overflow-hidden bg-muted/30">
-      <Sidebar
-        boards={boards}
-        activeBoardId={activeBoardId}
-        onSelectBoard={setActiveBoardId}
-        isOpen={sidebarOpen}
-        onToggle={() => setSidebarOpen(!sidebarOpen)}
-      />
-
-      <div className="flex flex-1 flex-col overflow-hidden min-w-0">
-        <BoardHeader
-          board={activeBoard}
-          sidebarOpen={sidebarOpen}
-          onToggleSidebar={() => setSidebarOpen(!sidebarOpen)}
+    <AuthGuard>
+      <div className="flex h-screen overflow-hidden bg-muted/30">
+        <Sidebar
+          boards={boards}
+          activeBoardId={activeBoardId}
+          onSelectBoard={setActiveBoardId}
+          isOpen={sidebarOpen}
+          onToggle={() => setSidebarOpen(!sidebarOpen)}
         />
 
-        <main className="flex-1 overflow-hidden min-w-0">
-          {activeBoard ? (
-            <KanbanBoard board={activeBoard} />
-          ) : (
-            <EmptyState />
-          )}
-        </main>
+        <div className="flex flex-1 flex-col overflow-hidden min-w-0">
+          <BoardHeader
+            board={activeBoard}
+            sidebarOpen={sidebarOpen}
+            onToggleSidebar={() => setSidebarOpen(!sidebarOpen)}
+          />
+
+          <main className="flex-1 overflow-hidden min-w-0">
+            {activeBoard ? (
+              <KanbanBoard board={activeBoard} />
+            ) : (
+              <EmptyState />
+            )}
+          </main>
+        </div>
       </div>
-    </div>
+    </AuthGuard>
   );
 }

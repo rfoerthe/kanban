@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useBoardStore } from "@/lib/store";
+import { useAuthStore } from "@/lib/auth-store";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
@@ -31,8 +32,11 @@ export function Sidebar({
   onToggle,
 }: SidebarProps) {
   const { deleteBoard } = useBoardStore();
+  const { user } = useAuthStore();
   const [showCreateDialog, setShowCreateDialog] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+
+  const isAdmin = user?.role === "ADMIN";
 
   const handleDelete = async (boardId: string, e: React.MouseEvent) => {
     e.stopPropagation();
@@ -91,20 +95,22 @@ export function Sidebar({
                 )}
               >
                 <span className="truncate">{board.title}</span>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className={cn(
-                    "h-6 w-6 shrink-0 opacity-0 transition-opacity group-hover:opacity-100",
-                    activeBoardId === board.id
-                      ? "hover:bg-primary-foreground/20 text-primary-foreground"
-                      : "hover:bg-destructive/10 text-muted-foreground hover:text-destructive"
-                  )}
-                  onClick={(e) => handleDelete(board.id, e)}
-                  disabled={deletingId === board.id}
-                >
-                  <Trash2 className="h-3.5 w-3.5" />
-                </Button>
+                {isAdmin && (
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className={cn(
+                      "h-6 w-6 shrink-0 opacity-0 transition-opacity group-hover:opacity-100",
+                      activeBoardId === board.id
+                        ? "hover:bg-primary-foreground/20 text-primary-foreground"
+                        : "hover:bg-destructive/10 text-muted-foreground hover:text-destructive"
+                    )}
+                    onClick={(e) => handleDelete(board.id, e)}
+                    disabled={deletingId === board.id}
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </Button>
+                )}
               </div>
             ))}
           </div>
@@ -112,16 +118,18 @@ export function Sidebar({
 
         <Separator />
 
-        <div className="p-2">
-          <Button
-            variant="ghost"
-            className="w-full justify-start gap-2 text-muted-foreground"
-            onClick={() => setShowCreateDialog(true)}
-          >
-            <Plus className="h-4 w-4" />
-            New Board
-          </Button>
-        </div>
+        {isAdmin && (
+          <div className="p-2">
+            <Button
+              variant="ghost"
+              className="w-full justify-start gap-2 text-muted-foreground"
+              onClick={() => setShowCreateDialog(true)}
+            >
+              <Plus className="h-4 w-4" />
+              New Board
+            </Button>
+          </div>
+        )}
       </aside>
 
       <CreateBoardDialog

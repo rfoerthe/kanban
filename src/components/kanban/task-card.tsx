@@ -11,9 +11,11 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { MoreHorizontal, Pencil, Trash2, GripVertical } from "lucide-react";
+import { MoreHorizontal, Pencil, Trash2, GripVertical, History } from "lucide-react";
 import { useBoardStore } from "@/lib/store";
+import { useAuthStore } from "@/lib/auth-store";
 import { EditTaskDialog } from "@/components/kanban/edit-task-dialog";
+import { TaskHistoryDialog } from "@/components/kanban/task-history-dialog";
 import type { TaskWithRelations } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
@@ -41,7 +43,11 @@ const priorityConfig = {
 
 export function TaskCard({ task, isOverlay }: TaskCardProps) {
   const { deleteTask } = useBoardStore();
+  const { user } = useAuthStore();
   const [showEditDialog, setShowEditDialog] = useState(false);
+  const [showHistoryDialog, setShowHistoryDialog] = useState(false);
+
+  const isViewer = user?.role === "VIEWER";
 
   const {
     attributes,
@@ -53,6 +59,7 @@ export function TaskCard({ task, isOverlay }: TaskCardProps) {
   } = useSortable({
     id: task.id,
     data: { type: "task", task },
+    disabled: isViewer,
   });
 
   const style = {
@@ -75,13 +82,15 @@ export function TaskCard({ task, isOverlay }: TaskCardProps) {
       >
         <div className="flex items-start justify-between gap-2">
           <div className="flex items-start gap-2 min-w-0 flex-1">
-            <button
-              className="mt-0.5 shrink-0 cursor-grab text-muted-foreground/50 hover:text-muted-foreground active:cursor-grabbing"
-              {...attributes}
-              {...listeners}
-            >
-              <GripVertical className="h-4 w-4" />
-            </button>
+            {!isViewer && (
+              <button
+                className="mt-0.5 shrink-0 cursor-grab text-muted-foreground/50 hover:text-muted-foreground active:cursor-grabbing"
+                {...attributes}
+                {...listeners}
+              >
+                <GripVertical className="h-4 w-4" />
+              </button>
+            )}
 
             <div className="min-w-0 flex-1">
               <p className="text-sm font-medium leading-snug">{task.title}</p>
@@ -93,34 +102,44 @@ export function TaskCard({ task, isOverlay }: TaskCardProps) {
             </div>
           </div>
 
-          <DropdownMenu>
-            <DropdownMenuTrigger render={<Button variant="ghost" size="icon" className="h-6 w-6 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity" />}>
-                <MoreHorizontal className="h-3.5 w-3.5" />
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              <DropdownMenuItem onClick={() => setShowEditDialog(true)}>
-                <Pencil className="mr-2 h-4 w-4" />
-                Edit
-              </DropdownMenuItem>
-              <DropdownMenuItem
-                className="text-destructive"
-                onClick={() => deleteTask(task.id)}
-              >
-                <Trash2 className="mr-2 h-4 w-4" />
-                Delete
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
+          {!isViewer && (
+            <DropdownMenu>
+              <DropdownMenuTrigger render={<Button variant="ghost" size="icon" className="h-6 w-6 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity" />}>
+                  <MoreHorizontal className="h-3.5 w-3.5" />
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem onClick={() => setShowEditDialog(true)}>
+                  <Pencil className="mr-2 h-4 w-4" />
+                  Edit
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  className="text-destructive"
+                  onClick={() => deleteTask(task.id)}
+                >
+                  <Trash2 className="mr-2 h-4 w-4" />
+                  Delete
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          )}
         </div>
 
         {priority && (
-          <div className="mt-2">
+          <div className="mt-2 flex items-center justify-between">
             <Badge
               variant="secondary"
               className={cn("text-[10px] px-1.5 py-0", priority.className)}
             >
               {priority.label}
             </Badge>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-6 w-6 text-muted-foreground/50 opacity-0 transition-opacity group-hover:opacity-100 hover:text-foreground"
+              onClick={() => setShowHistoryDialog(true)}
+            >
+              <History className="h-3.5 w-3.5" />
+            </Button>
           </div>
         )}
       </div>
@@ -129,6 +148,12 @@ export function TaskCard({ task, isOverlay }: TaskCardProps) {
         open={showEditDialog}
         onOpenChange={setShowEditDialog}
         task={task}
+      />
+
+      <TaskHistoryDialog
+        open={showHistoryDialog}
+        onOpenChange={setShowHistoryDialog}
+        taskId={task.id}
       />
     </>
   );

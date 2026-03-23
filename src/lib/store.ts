@@ -17,6 +17,7 @@ interface BoardState {
   setBoards: (boards: BoardWithColumns[]) => void;
   setActiveBoardId: (id: string | null) => void;
   getActiveBoard: () => BoardWithColumns | undefined;
+  fetchBoards: () => Promise<void>;
 
   createBoard: (title: string) => Promise<void>;
   updateBoard: (boardId: string, title: string) => Promise<void>;
@@ -73,6 +74,19 @@ export const useBoardStore = create<BoardState>((set, get) => ({
   getActiveBoard: () => {
     const { boards, activeBoardId } = get();
     return boards.find((b) => b.id === activeBoardId);
+  },
+
+  fetchBoards: async () => {
+    try {
+      const boards = await actions.getBoards();
+      set({ boards });
+      const { activeBoardId } = get();
+      if (!activeBoardId && boards.length > 0) {
+        set({ activeBoardId: boards[0].id });
+      }
+    } catch {
+      set({ boards: [] });
+    }
   },
 
   createBoard: async (title) => {
