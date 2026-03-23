@@ -25,7 +25,7 @@ import { useBoardStore } from "@/lib/store";
 import { useAuthStore } from "@/lib/auth-store";
 import { EditBoardDialog } from "@/components/kanban/edit-board-dialog";
 import { UserProfileDialog } from "@/components/kanban/user-profile-dialog";
-import { CreateUserDialog } from "@/components/kanban/create-user-dialog";
+import { UserManagementDialog } from "@/components/kanban/user-management-dialog";
 import { ThemeToggle } from "@/components/kanban/theme-toggle";
 
 interface BoardHeaderProps {
@@ -44,7 +44,7 @@ export function BoardHeader({
   const [showAddColumn, setShowAddColumn] = useState(false);
   const [showEditBoard, setShowEditBoard] = useState(false);
   const [showProfile, setShowProfile] = useState(false);
-  const [showCreateUser, setShowCreateUser] = useState(false);
+  const [showUserManagement, setShowUserManagement] = useState(false);
 
   const isAdmin = user?.role === "ADMIN";
 
@@ -115,7 +115,7 @@ export function BoardHeader({
                 Profile
               </DropdownMenuItem>
               {isAdmin && (
-                <DropdownMenuItem onClick={() => setShowCreateUser(true)}>
+                <DropdownMenuItem onClick={() => setShowUserManagement(true)}>
                   <Users className="mr-2 h-4 w-4" />
                   User Management
                 </DropdownMenuItem>
@@ -151,9 +151,9 @@ export function BoardHeader({
       />
 
       {isAdmin && (
-        <CreateUserDialog
-          open={showCreateUser}
-          onOpenChange={setShowCreateUser}
+        <UserManagementDialog
+          open={showUserManagement}
+          onOpenChange={setShowUserManagement}
         />
       )}
     </>

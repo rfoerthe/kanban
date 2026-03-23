@@ -128,3 +128,86 @@ export async function getUsers(): Promise<SafeUser[]> {
     orderBy: { createdAt: "asc" },
   });
 }
+
+export async function updateUser(
+  userId: string,
+  data: {
+    firstName?: string;
+    lastName?: string;
+    username?: string;
+    role?: string;
+  }
+): Promise<{ success: boolean; error?: string }> {
+  await requireRole(["ADMIN"]);
+
+  const user = await prisma.user.findUnique({ where: { id: userId } });
+  if (!user) {
+    return { success: false, error: "User not found" };
+  }
+
+  if (data.username && data.username !== user.username) {
+    const existing = await prisma.user.findUnique({
+      where: { username: data.username },
+    });
+    if (existing) {
+      return { success: false, error: "Username already exists" };
+    }
+  }
+
+  const updateData: Record<string, string> = {};
+  if (data.firstName !== undefined) updateData.firstName = data.firstName;
+  if (data.lastName !== undefined) updateData.lastName = data.lastName;
+  if (data.username !== undefined) updateData.username = data.username;
+  if (data.role !== undefined) updateData.role = data.role;
+
+  await prisma.user.update({
+    where: { id: userId },
+    data: updateData,
+  });
+
+  return { success: true };
+}
+
+export async function deleteUser(
+  userId: string
+): Promise<{ success: boolean; error?: string }> {
+  const currentUser = await requireRole(["ADMIN"]);
+
+  if (currentUser.id === userId) {
+    return { success: false, error: "You cannot delete your own account" };
+  }
+
+  const user = await prisma.user.findUnique({ where: { id: userId } });
+  if (!user) {
+    return { success: false, error: "User not found" };
+  }
+
+  await prisma.user.delete({ where: { id: userId } });
+
+  return { success: true };
+}
+
+export async function resetPassword(
+  userId: string,
+  newPassword: string
+): Promise<{ success: boolean; error?: string }> {
+  await requireRole(["ADMIN"]);
+
+  if (newPassword.length < 6) {
+    return { success: false, error: "Password must be at least 6 characters" };
+  }
+
+  const user = await prisma.user.findUnique({ where: { id: userId } });
+  if (!user) {
+    return { success: false, error: "User not found" };
+  }
+
+  const passwordHash = await hashPassword(newPassword);
+
+  await prisma.user.update({
+    where: { id: userId },
+    data: { passwordHash },
+  });
+
+  return { success: true };
+}
