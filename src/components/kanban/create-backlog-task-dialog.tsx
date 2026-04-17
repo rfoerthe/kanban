@@ -1,7 +1,8 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import { useBoardStore } from "@/lib/store";
+import { useState } from "react";
+import { useBacklogStore } from "@/lib/backlog-store";
+import { useAuthStore } from "@/lib/auth-store";
 import {
   Dialog,
   DialogContent,
@@ -21,48 +22,42 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Loader2 } from "lucide-react";
-import type { TaskWithRelations, Priority, TaskAssignee } from "@/lib/types";
+import type { Priority, TaskStatus, TaskAssignee } from "@/lib/types";
 import { getAssignableUsers } from "@/lib/actions";
+import { useEffect } from "react";
 
-interface EditTaskDialogProps {
+interface CreateBacklogTaskDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  task: TaskWithRelations;
 }
 
-export function EditTaskDialog({
+export function CreateBacklogTaskDialog({
   open,
   onOpenChange,
-  task,
-}: EditTaskDialogProps) {
-  const { updateTask } = useBoardStore();
-  const [title, setTitle] = useState(task.title);
-  const [description, setDescription] = useState(task.description ?? "");
-  const [priority, setPriority] = useState<Priority>(
-    task.priority as Priority
-  );
-  const [assigneeId, setAssigneeId] = useState<string | null>(task.assigneeId ?? null);
+}: CreateBacklogTaskDialogProps) {
+  const { createTask } = useBacklogStore();
+  const { user } = useAuthStore();
+  const [title, setTitle] = useState("");
+  const [description, setDescription] = useState("");
+  const [priority, setPriority] = useState<Priority>("MEDIUM");
+  const [status, setStatus] = useState<TaskStatus>("NEW");
+  const [assigneeId, setAssigneeId] = useState<string | null>(null);
   const [users, setUsers] = useState<TaskAssignee[]>([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
-
-  const assigneeLabel = (() => {
-    if (!assigneeId) return "Unassigned";
-    const user = users.find((u) => u.id === assigneeId);
-    if (user) return `${user.firstName} ${user.lastName}`;
-    if (task.assignee && task.assigneeId === assigneeId)
-      return `${task.assignee.firstName} ${task.assignee.lastName}`;
-    return "Loading…";
-  })();
 
   useEffect(() => {
     if (open) {
       getAssignableUsers().then(setUsers);
-      setTitle(task.title);
-      setDescription(task.description ?? "");
-      setPriority(task.priority as Priority);
-      setAssigneeId(task.assigneeId ?? null);
     }
-  }, [open, task]);
+  }, [open]);
+
+  const isViewer = user?.role === "VIEWER";
+
+  const assigneeLabel = (() => {
+    if (!assigneeId) return "Unassigned";
+    const u = users.find((u) => u.id === assigneeId);
+    return u ? `${u.firstName} ${u.lastName}` : "Loading…";
+  })();
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -70,41 +65,44 @@ export function EditTaskDialog({
 
     setIsSubmitting(true);
     try {
-      await updateTask(task.id, {
-        title: title.trim(),
-        description: description.trim() || null,
-        priority,
-        assigneeId,
-      });
+      await createTask(title.trim(), description.trim(), priority, status, assigneeId);
+      setTitle("");
+      setDescription("");
+      setPriority("MEDIUM");
+      setStatus("NEW");
+      setAssigneeId(null);
       onOpenChange(false);
     } finally {
       setIsSubmitting(false);
     }
   };
 
+  if (isViewer) return null;
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-[480px]">
         <DialogHeader>
-          <DialogTitle>Edit Task</DialogTitle>
+          <DialogTitle>Create Task</DialogTitle>
         </DialogHeader>
         <form onSubmit={handleSubmit}>
           <div className="space-y-4 py-4">
             <div>
-              <Label htmlFor="edit-task-title">Title</Label>
+              <Label htmlFor="backlog-task-title">Title</Label>
               <Input
-                id="edit-task-title"
+                id="backlog-task-title"
                 value={title}
                 onChange={(e) => setTitle(e.target.value)}
+                placeholder="What needs to be done?"
                 className="mt-1.5"
                 autoFocus
               />
             </div>
 
             <div>
-              <Label htmlFor="edit-task-description">Description</Label>
+              <Label htmlFor="backlog-task-description">Description</Label>
               <Textarea
-                id="edit-task-description"
+                id="backlog-task-description"
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
                 placeholder="Add details…"
@@ -113,25 +111,44 @@ export function EditTaskDialog({
               />
             </div>
 
-            <div>
-              <Label htmlFor="edit-task-priority">Priority</Label>
-              <Select
-                value={priority}
-                onValueChange={(v) => setPriority(v as Priority)}
-              >
-                <SelectTrigger className="mt-1.5">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="LOW">Low</SelectItem>
-                  <SelectItem value="MEDIUM">Medium</SelectItem>
-                  <SelectItem value="HIGH">High</SelectItem>
-                </SelectContent>
-              </Select>
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <Label htmlFor="backlog-task-priority">Priority</Label>
+                <Select
+                  value={priority}
+                  onValueChange={(v) => setPriority(v as Priority)}
+                >
+                  <SelectTrigger className="mt-1.5">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="LOW">Low</SelectItem>
+                    <SelectItem value="MEDIUM">Medium</SelectItem>
+                    <SelectItem value="HIGH">High</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div>
+                <Label htmlFor="backlog-task-status">Status</Label>
+                <Select
+                  value={status}
+                  onValueChange={(v) => setStatus(v as TaskStatus)}
+                >
+                  <SelectTrigger className="mt-1.5">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="NEW">New</SelectItem>
+                    <SelectItem value="DONE">Done</SelectItem>
+                    <SelectItem value="REVOKED">Revoked</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
             </div>
 
             <div>
-              <Label htmlFor="edit-task-assignee">Assignee</Label>
+              <Label htmlFor="backlog-task-assignee">Assignee</Label>
               <Select
                 value={assigneeId ?? "unassigned"}
                 onValueChange={(v) => setAssigneeId(v === "unassigned" ? null : v)}
@@ -163,10 +180,10 @@ export function EditTaskDialog({
               {isSubmitting ? (
                 <>
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  Saving…
+                  Creating…
                 </>
               ) : (
-                "Save Changes"
+                "Create Task"
               )}
             </Button>
           </DialogFooter>

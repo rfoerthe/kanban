@@ -8,13 +8,14 @@ datasource db {
 }
 
 model User {
-  id           String   @id @default(cuid())
-  firstName    String
-  lastName     String
-  username     String   @unique
-  passwordHash String
-  role         String   @default("USER")
-  createdAt    DateTime @default(now())
+  id            String   @id @default(cuid())
+  firstName     String
+  lastName      String
+  username      String   @unique
+  passwordHash  String
+  role          String   @default("USER")
+  createdAt     DateTime @default(now())
+  assignedTasks Task[]   @relation("TaskAssignee")
 }
 
 model Board {
@@ -41,14 +42,19 @@ model Task {
   title       String
   description String?
   priority    String        @default("MEDIUM")
+  status      String        @default("NEW")
   position    Int           @default(0)
-  columnId    String
-  column      Column        @relation(fields: [columnId], references: [id], onDelete: Cascade)
+  columnId    String?
+  column      Column?       @relation(fields: [columnId], references: [id], onDelete: SetNull)
+  assigneeId  String?
+  assignee    User?         @relation("TaskAssignee", fields: [assigneeId], references: [id], onDelete: SetNull)
   history     TaskHistory[]
   createdAt   DateTime      @default(now())
   updatedAt   DateTime      @updatedAt
 
   @@index([columnId, position])
+  @@index([assigneeId])
+  @@index([status])
 }
 
 model TaskHistory {

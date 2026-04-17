@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useBoardStore } from "@/lib/store";
 import {
   Dialog,
@@ -21,7 +21,8 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Loader2 } from "lucide-react";
-import type { Priority } from "@/lib/types";
+import type { Priority, TaskAssignee } from "@/lib/types";
+import { getAssignableUsers } from "@/lib/actions";
 
 interface CreateTaskDialogProps {
   open: boolean;
@@ -38,7 +39,21 @@ export function CreateTaskDialog({
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [priority, setPriority] = useState<Priority>("MEDIUM");
+  const [assigneeId, setAssigneeId] = useState<string | null>(null);
+  const [users, setUsers] = useState<TaskAssignee[]>([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  const assigneeLabel = (() => {
+    if (!assigneeId) return "Unassigned";
+    const user = users.find((u) => u.id === assigneeId);
+    return user ? `${user.firstName} ${user.lastName}` : "Loading…";
+  })();
+
+  useEffect(() => {
+    if (open) {
+      getAssignableUsers().then(setUsers);
+    }
+  }, [open]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -46,10 +61,11 @@ export function CreateTaskDialog({
 
     setIsSubmitting(true);
     try {
-      await createTask(columnId, title.trim(), description.trim(), priority);
+      await createTask(columnId, title.trim(), description.trim(), priority, assigneeId);
       setTitle("");
       setDescription("");
       setPriority("MEDIUM");
+      setAssigneeId(null);
       onOpenChange(false);
     } finally {
       setIsSubmitting(false);
@@ -101,6 +117,26 @@ export function CreateTaskDialog({
                   <SelectItem value="LOW">Low</SelectItem>
                   <SelectItem value="MEDIUM">Medium</SelectItem>
                   <SelectItem value="HIGH">High</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div>
+              <Label htmlFor="task-assignee">Assignee</Label>
+              <Select
+                value={assigneeId ?? "unassigned"}
+                onValueChange={(v) => setAssigneeId(v === "unassigned" ? null : v)}
+              >
+                <SelectTrigger className="mt-1.5">
+                  <span className="flex flex-1 text-left">{assigneeLabel}</span>
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="unassigned">Unassigned</SelectItem>
+                  {users.map((u) => (
+                    <SelectItem key={u.id} value={u.id}>
+                      {u.firstName} {u.lastName}
+                    </SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
             </div>

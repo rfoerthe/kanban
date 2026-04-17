@@ -31,11 +31,17 @@ interface BoardState {
     columnId: string,
     title: string,
     description: string,
-    priority: Priority
+    priority: Priority,
+    assigneeId: string | null
   ) => Promise<void>;
   updateTask: (
     taskId: string,
-    data: { title?: string; description?: string | null; priority?: Priority }
+    data: {
+      title?: string;
+      description?: string | null;
+      priority?: Priority;
+      assigneeId?: string | null;
+    }
   ) => Promise<void>;
   deleteTask: (taskId: string) => Promise<void>;
 
@@ -154,8 +160,8 @@ export const useBoardStore = create<BoardState>((set, get) => ({
     }));
   },
 
-  createTask: async (columnId, title, description, priority) => {
-    const task = await actions.createTask(columnId, title, description, priority);
+  createTask: async (columnId, title, description, priority, assigneeId) => {
+    const task = await actions.createTask(columnId, title, description, priority, assigneeId);
     set((state) => ({
       boards: state.boards.map((b) => ({
         ...b,
@@ -167,14 +173,14 @@ export const useBoardStore = create<BoardState>((set, get) => ({
   },
 
   updateTask: async (taskId, data) => {
-    await actions.updateTask(taskId, data);
+    const task = await actions.updateTask(taskId, data);
     set((state) => ({
       boards: state.boards.map((b) => ({
         ...b,
         columns: b.columns.map((c) => ({
           ...c,
           tasks: c.tasks.map((t) =>
-            t.id === taskId ? { ...t, ...data } : t
+            t.id === taskId ? { ...t, ...task } : t
           ),
         })),
       })),

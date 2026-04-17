@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { useBoardStore } from "@/lib/store";
+import { useBacklogStore } from "@/lib/backlog-store";
 import {
   Dialog,
   DialogContent,
@@ -21,38 +21,30 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Loader2 } from "lucide-react";
-import type { TaskWithRelations, Priority, TaskAssignee } from "@/lib/types";
+import type { BacklogTask, Priority, TaskStatus, TaskAssignee } from "@/lib/types";
 import { getAssignableUsers } from "@/lib/actions";
 
-interface EditTaskDialogProps {
+interface EditBacklogTaskDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  task: TaskWithRelations;
+  task: BacklogTask;
 }
 
-export function EditTaskDialog({
+export function EditBacklogTaskDialog({
   open,
   onOpenChange,
   task,
-}: EditTaskDialogProps) {
-  const { updateTask } = useBoardStore();
+}: EditBacklogTaskDialogProps) {
+  const { updateTask } = useBacklogStore();
   const [title, setTitle] = useState(task.title);
   const [description, setDescription] = useState(task.description ?? "");
-  const [priority, setPriority] = useState<Priority>(
-    task.priority as Priority
-  );
+  const [priority, setPriority] = useState<Priority>(task.priority as Priority);
+  const [status, setStatus] = useState<TaskStatus>(task.status as TaskStatus);
   const [assigneeId, setAssigneeId] = useState<string | null>(task.assigneeId ?? null);
   const [users, setUsers] = useState<TaskAssignee[]>([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const assigneeLabel = (() => {
-    if (!assigneeId) return "Unassigned";
-    const user = users.find((u) => u.id === assigneeId);
-    if (user) return `${user.firstName} ${user.lastName}`;
-    if (task.assignee && task.assigneeId === assigneeId)
-      return `${task.assignee.firstName} ${task.assignee.lastName}`;
-    return "Loading…";
-  })();
+  const isPlanned = task.status === "PLANNED";
 
   useEffect(() => {
     if (open) {
@@ -60,9 +52,19 @@ export function EditTaskDialog({
       setTitle(task.title);
       setDescription(task.description ?? "");
       setPriority(task.priority as Priority);
+      setStatus(task.status as TaskStatus);
       setAssigneeId(task.assigneeId ?? null);
     }
   }, [open, task]);
+
+  const assigneeLabel = (() => {
+    if (!assigneeId) return "Unassigned";
+    const u = users.find((u) => u.id === assigneeId);
+    if (u) return `${u.firstName} ${u.lastName}`;
+    if (task.assignee && task.assigneeId === assigneeId)
+      return `${task.assignee.firstName} ${task.assignee.lastName}`;
+    return "Loading…";
+  })();
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -74,6 +76,7 @@ export function EditTaskDialog({
         title: title.trim(),
         description: description.trim() || null,
         priority,
+        ...(!isPlanned && { status }),
         assigneeId,
       });
       onOpenChange(false);
@@ -91,9 +94,9 @@ export function EditTaskDialog({
         <form onSubmit={handleSubmit}>
           <div className="space-y-4 py-4">
             <div>
-              <Label htmlFor="edit-task-title">Title</Label>
+              <Label htmlFor="edit-backlog-title">Title</Label>
               <Input
-                id="edit-task-title"
+                id="edit-backlog-title"
                 value={title}
                 onChange={(e) => setTitle(e.target.value)}
                 className="mt-1.5"
@@ -102,9 +105,9 @@ export function EditTaskDialog({
             </div>
 
             <div>
-              <Label htmlFor="edit-task-description">Description</Label>
+              <Label htmlFor="edit-backlog-description">Description</Label>
               <Textarea
-                id="edit-task-description"
+                id="edit-backlog-description"
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
                 placeholder="Add details…"
@@ -113,25 +116,46 @@ export function EditTaskDialog({
               />
             </div>
 
-            <div>
-              <Label htmlFor="edit-task-priority">Priority</Label>
-              <Select
-                value={priority}
-                onValueChange={(v) => setPriority(v as Priority)}
-              >
-                <SelectTrigger className="mt-1.5">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="LOW">Low</SelectItem>
-                  <SelectItem value="MEDIUM">Medium</SelectItem>
-                  <SelectItem value="HIGH">High</SelectItem>
-                </SelectContent>
-              </Select>
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <Label htmlFor="edit-backlog-priority">Priority</Label>
+                <Select
+                  value={priority}
+                  onValueChange={(v) => setPriority(v as Priority)}
+                >
+                  <SelectTrigger className="mt-1.5">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="LOW">Low</SelectItem>
+                    <SelectItem value="MEDIUM">Medium</SelectItem>
+                    <SelectItem value="HIGH">High</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div>
+                <Label htmlFor="edit-backlog-status">Status</Label>
+                <Select
+                  value={status}
+                  onValueChange={(v) => setStatus(v as TaskStatus)}
+                  disabled={isPlanned}
+                >
+                  <SelectTrigger className="mt-1.5">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="NEW">New</SelectItem>
+                    <SelectItem value="PLANNED" disabled>Planned</SelectItem>
+                    <SelectItem value="DONE">Done</SelectItem>
+                    <SelectItem value="REVOKED">Revoked</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
             </div>
 
             <div>
-              <Label htmlFor="edit-task-assignee">Assignee</Label>
+              <Label htmlFor="edit-backlog-assignee">Assignee</Label>
               <Select
                 value={assigneeId ?? "unassigned"}
                 onValueChange={(v) => setAssigneeId(v === "unassigned" ? null : v)}

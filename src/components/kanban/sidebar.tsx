@@ -21,9 +21,12 @@ import {
   ChevronLeft,
   Trash2,
   Loader2,
+  ClipboardList,
 } from "lucide-react";
 import type { BoardWithColumns } from "@/lib/types";
 import { cn } from "@/lib/utils";
+
+export type ActiveView = "boards" | "tasks";
 
 interface SidebarProps {
   boards: BoardWithColumns[];
@@ -31,6 +34,8 @@ interface SidebarProps {
   onSelectBoard: (id: string) => void;
   isOpen: boolean;
   onToggle: () => void;
+  activeView: ActiveView;
+  onChangeView: (view: ActiveView) => void;
 }
 
 export function Sidebar({
@@ -39,6 +44,8 @@ export function Sidebar({
   onSelectBoard,
   isOpen,
   onToggle,
+  activeView,
+  onChangeView,
 }: SidebarProps) {
   const { deleteBoard } = useBoardStore();
   const { user } = useAuthStore();
@@ -84,7 +91,38 @@ export function Sidebar({
 
         <Separator />
 
-        <ScrollArea className="flex-1 px-2 py-2">
+        <div className="px-2 py-2 space-y-1">
+          <button
+            onClick={() => onChangeView("boards")}
+            className={cn(
+              "flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors duration-150",
+              activeView === "boards"
+                ? "bg-accent text-accent-foreground font-medium"
+                : "text-muted-foreground hover:bg-accent hover:text-accent-foreground"
+            )}
+          >
+            <LayoutDashboard className="h-4 w-4" />
+            Boards
+          </button>
+          <button
+            onClick={() => onChangeView("tasks")}
+            className={cn(
+              "flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors duration-150",
+              activeView === "tasks"
+                ? "bg-accent text-accent-foreground font-medium"
+                : "text-muted-foreground hover:bg-accent hover:text-accent-foreground"
+            )}
+          >
+            <ClipboardList className="h-4 w-4" />
+            Tasks
+          </button>
+        </div>
+
+        <Separator />
+
+        {activeView === "boards" && (
+          <>
+            <ScrollArea className="flex-1 px-2 py-2">
           <div className="space-y-1">
             {boards.map((board) => (
               <div
@@ -143,6 +181,8 @@ export function Sidebar({
               New Board
             </Button>
           </div>
+        )}
+          </>
         )}
       </aside>
 

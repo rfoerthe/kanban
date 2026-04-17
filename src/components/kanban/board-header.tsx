@@ -90,8 +90,6 @@ export function BoardHeader({
         </div>
 
         <div className="flex items-center gap-2">
-          <ThemeToggle />
-
           {board && isAdmin && (
             <>
               {isAdmin && (
@@ -126,6 +124,8 @@ export function BoardHeader({
               </DropdownMenu>
             </>
           )}
+
+          <ThemeToggle />
 
           <DropdownMenu>
             <DropdownMenuTrigger render={<Button variant="ghost" size="icon" className="h-8 w-8" />}>

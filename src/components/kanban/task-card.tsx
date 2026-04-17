@@ -11,7 +11,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { MoreHorizontal, Pencil, Trash2, GripVertical, History } from "lucide-react";
+import { MoreHorizontal, Pencil, Trash2, GripVertical, History, UserPlus } from "lucide-react";
 import { useBoardStore } from "@/lib/store";
 import { useAuthStore } from "@/lib/auth-store";
 import { EditTaskDialog } from "@/components/kanban/edit-task-dialog";
@@ -42,7 +42,7 @@ const priorityConfig = {
 } as const;
 
 export function TaskCard({ task, isOverlay }: TaskCardProps) {
-  const { deleteTask } = useBoardStore();
+  const { deleteTask, updateTask } = useBoardStore();
   const { user } = useAuthStore();
   const [showEditDialog, setShowEditDialog] = useState(false);
   const [showHistoryDialog, setShowHistoryDialog] = useState(false);
@@ -126,20 +126,44 @@ export function TaskCard({ task, isOverlay }: TaskCardProps) {
 
         {priority && (
           <div className="mt-2 flex items-center justify-between">
-            <Badge
-              variant="secondary"
-              className={cn("text-[10px] px-1.5 py-0", priority.className)}
-            >
-              {priority.label}
-            </Badge>
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-6 w-6 text-muted-foreground/50 opacity-0 transition-opacity group-hover:opacity-100 hover:text-foreground"
-              onClick={() => setShowHistoryDialog(true)}
-            >
-              <History className="h-3.5 w-3.5" />
-            </Button>
+            <div className="flex items-center gap-1.5">
+              <Badge
+                variant="secondary"
+                className={cn("text-[10px] px-1.5 py-0", priority.className)}
+              >
+                {priority.label}
+              </Badge>
+              {task.assignee && (
+                <span
+                  className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-primary/10 text-[9px] font-medium text-primary"
+                  title={`${task.assignee.firstName} ${task.assignee.lastName}`}
+                >
+                  {task.assignee.firstName[0]}
+                  {task.assignee.lastName[0]}
+                </span>
+              )}
+            </div>
+            <div className="flex items-center gap-0.5">
+              {!isViewer && user && task.assigneeId !== user.id && (
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-6 w-6 text-muted-foreground/50 opacity-0 transition-opacity group-hover:opacity-100 hover:text-foreground"
+                  onClick={() => updateTask(task.id, { assigneeId: user.id })}
+                  title="Assign to me"
+                >
+                  <UserPlus className="h-3.5 w-3.5" />
+                </Button>
+              )}
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-6 w-6 text-muted-foreground/50 opacity-0 transition-opacity group-hover:opacity-100 hover:text-foreground"
+                onClick={() => setShowHistoryDialog(true)}
+              >
+                <History className="h-3.5 w-3.5" />
+              </Button>
+            </div>
           </div>
         )}
       </div>
