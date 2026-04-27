@@ -18,7 +18,6 @@ import {
   SelectContent,
   SelectItem,
   SelectTrigger,
-  SelectValue,
 } from "@/components/ui/select";
 import { Loader2 } from "lucide-react";
 import type { BacklogTask, Priority, TaskStatus, TaskAssignee } from "@/lib/types";
@@ -124,7 +123,7 @@ export function EditBacklogTaskDialog({
                   onValueChange={(v) => setPriority(v as Priority)}
                 >
                   <SelectTrigger className="mt-1.5">
-                    <SelectValue />
+                    <span className="flex flex-1 text-left">{{ LOW: "Low", MEDIUM: "Medium", HIGH: "High" }[priority]}</span>
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="LOW">Low</SelectItem>
@@ -142,7 +141,7 @@ export function EditBacklogTaskDialog({
                   disabled={isPlanned}
                 >
                   <SelectTrigger className="mt-1.5">
-                    <SelectValue />
+                    <span className="flex flex-1 text-left">{{ NEW: "New", PLANNED: "Planned", DONE: "Done", REVOKED: "Revoked" }[status]}</span>
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="NEW">New</SelectItem>

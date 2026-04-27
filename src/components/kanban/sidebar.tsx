@@ -77,7 +77,7 @@ export function Sidebar({
         <div className="flex items-center justify-between px-4 py-4">
           <div className="flex items-center gap-2">
             <LayoutDashboard className="h-5 w-5 text-primary" />
-            <h2 className="text-sm font-semibold tracking-tight">Boards</h2>
+            <h2 className="text-sm font-semibold tracking-tight">Kanban Boards</h2>
           </div>
           <Button
             variant="ghost"
@@ -93,18 +93,6 @@ export function Sidebar({
 
         <div className="px-2 py-2 space-y-1">
           <button
-            onClick={() => onChangeView("boards")}
-            className={cn(
-              "flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors duration-150",
-              activeView === "boards"
-                ? "bg-accent text-accent-foreground font-medium"
-                : "text-muted-foreground hover:bg-accent hover:text-accent-foreground"
-            )}
-          >
-            <LayoutDashboard className="h-4 w-4" />
-            Boards
-          </button>
-          <button
             onClick={() => onChangeView("tasks")}
             className={cn(
               "flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors duration-150",
@@ -115,6 +103,18 @@ export function Sidebar({
           >
             <ClipboardList className="h-4 w-4" />
             Tasks
+          </button>
+          <button
+            onClick={() => onChangeView("boards")}
+            className={cn(
+              "flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors duration-150",
+              activeView === "boards"
+                ? "bg-accent text-accent-foreground font-medium"
+                : "text-muted-foreground hover:bg-accent hover:text-accent-foreground"
+            )}
+          >
+            <LayoutDashboard className="h-4 w-4" />
+            Boards
           </button>
         </div>
 

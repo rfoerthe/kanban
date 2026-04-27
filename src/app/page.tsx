@@ -9,6 +9,7 @@ export default async function Home() {
   } catch {
     boards = [];
   }
+  
 
   return <BoardShell initialBoards={boards} />;
 }

@@ -18,7 +18,6 @@ import {
   SelectContent,
   SelectItem,
   SelectTrigger,
-  SelectValue,
 } from "@/components/ui/select";
 import { Loader2 } from "lucide-react";
 import type { Priority, TaskAssignee } from "@/lib/types";
@@ -111,7 +110,7 @@ export function CreateTaskDialog({
                 onValueChange={(v) => setPriority(v as Priority)}
               >
                 <SelectTrigger className="mt-1.5">
-                  <SelectValue />
+                  <span className="flex flex-1 text-left">{{ LOW: "Low", MEDIUM: "Medium", HIGH: "High" }[priority]}</span>
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="LOW">Low</SelectItem>
