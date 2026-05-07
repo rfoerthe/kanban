@@ -1,368 +1,257 @@
 # Server Actions Reference
 
-All mutations are implemented as Next.js Server Actions — async functions marked `"use server"` that are called directly from client code. There are no HTTP API routes.
+All server-side mutations and authenticated reads are implemented as **Next.js Server Actions**. There are no API routes.
 
-## How Server Actions work here
+Main action files:
 
-- All Server Action files live in `src/lib/actions.ts` (board/task operations) and `src/lib/auth-actions.ts` (auth operations).
-- Every action checks authentication before doing anything. Authorization failures throw `Error("Unauthorized")` or `Error("Forbidden")`.
-- Business logic errors either throw (e.g. `deleteColumn` with tasks) or return `{ success: false, error: string }` (auth actions).
-- All mutating actions call `revalidatePath("/")` to clear the Next.js full-route cache, ensuring fresh data on the next server render.
-- Callers (Zustand store methods) wrap thrown errors in try/catch and update local state after success.
+- `src/lib/actions.ts` — boards, columns, board tasks, backlog tasks, task history
+- `src/lib/auth-actions.ts` — login/logout, current user, user CRUD, password flows
 
----
+## Common behavior
 
-## Board & Task Actions (`src/lib/actions.ts`)
+- Authenticated reads use `requireAuth()`.
+- Writes use `requireRole()`.
+- Most mutating actions call `revalidatePath("/")`.
+- Client components usually reach these actions through Zustand stores, except for some auth/user dialogs and history fetches.
+
+## Domain actions (`src/lib/actions.ts`)
+
+### Assignable-user helper
+
+#### `getAssignableUsers()`
+
+- auth: any authenticated user
+- returns: users selectable as task assignees
+- used by: board task dialogs and backlog task dialogs
+
+## Board actions
 
 ### `getBoards()`
 
-```ts
-async function getBoards(): Promise<BoardWithColumns[]>
-```
-
-| | |
-|---|---|
-| Required role | Any authenticated user |
-| Returns | All boards ordered by `createdAt desc`, each including columns (ordered by `position asc`) and tasks (ordered by `position asc`) |
-
----
+- auth: any authenticated user
+- returns: all boards by `createdAt desc`
+- includes:
+  - columns by `position asc`
+  - tasks by `position asc`
+  - task assignee preview data
 
 ### `getBoard(boardId)`
 
-```ts
-async function getBoard(boardId: string): Promise<BoardWithColumns | null>
-```
-
-| | |
-|---|---|
-| Required role | Any authenticated user |
-| Returns | Single board with columns and tasks, or `null` if not found |
-
----
+- auth: any authenticated user
+- returns: one board with columns, tasks, and assignee data
 
 ### `createBoard(title)`
 
-```ts
-async function createBoard(title: string): Promise<BoardWithColumns>
-```
-
-| | |
-|---|---|
-| Required role | ADMIN |
-| Returns | New board with three default columns: "To Do" (pos 0), "In Progress" (pos 1), "Done" (pos 2) |
-
----
+- auth: `ADMIN`
+- creates default columns:
+  - `To Do`
+  - `In Progress`
+  - `Done`
 
 ### `updateBoard(boardId, title)`
 
-```ts
-async function updateBoard(boardId: string, title: string): Promise<Board>
-```
-
-| | |
-|---|---|
-| Required role | ADMIN |
-| Returns | Updated board (without columns) |
-
----
+- auth: `ADMIN`
+- renames a board
 
 ### `deleteBoard(boardId)`
 
-```ts
-async function deleteBoard(boardId: string): Promise<void>
-```
+- auth: `ADMIN`
+- deletes the board row
+- note: because `Task.column` uses `SetNull`, tasks attached to deleted columns become backlog tasks
+- important caveat: this is not the same flow as `unassignTaskFromBoard()`; the task becomes unassigned because the column disappears, but its status is not reset to `NEW` by this path
 
-| | |
-|---|---|
-| Required role | ADMIN |
-| Notes | Cascade deletes all columns, tasks, and task history via DB foreign key cascade |
-
----
+## Column actions
 
 ### `createColumn(boardId, title)`
 
-```ts
-async function createColumn(boardId: string, title: string): Promise<ColumnWithTasks>
-```
-
-| | |
-|---|---|
-| Required role | ADMIN |
-| Returns | New column with empty `tasks` array |
-| Notes | Position is set to `max(existing positions) + 1` |
-
----
+- auth: `ADMIN`
+- sets `position` to max existing position + 1
 
 ### `updateColumn(columnId, title)`
 
-```ts
-async function updateColumn(columnId: string, title: string): Promise<Column>
-```
-
-| | |
-|---|---|
-| Required role | ADMIN |
-
----
+- auth: `ADMIN`
+- renames a column
 
 ### `deleteColumn(columnId)`
 
-```ts
-async function deleteColumn(columnId: string): Promise<void>
+- auth: `ADMIN`
+- application guard: throws if the column still contains tasks
+- message:
+
+```text
+Column still has tasks. Move or delete all tasks before deleting this column.
 ```
 
-| | |
-|---|---|
-| Required role | ADMIN |
-| Throws | `Error("Column still has tasks. Move or delete all tasks before deleting this column.")` if the column has any tasks |
-| Notes | This constraint is enforced by application logic, not by the database |
+## Board-task actions
 
----
+These actions operate on tasks already in board columns or being created directly into a board column.
 
-### `createTask(columnId, title, description?, priority?)`
+### `createTask(columnId, title, description?, priority?, assigneeId?)`
 
-```ts
-async function createTask(
-  columnId: string,
-  title: string,
-  description?: string,    // default: ""
-  priority?: Priority      // default: "MEDIUM"
-): Promise<Task>
-```
-
-| | |
-|---|---|
-| Required role | ADMIN or USER |
-| Returns | New task |
-| Side effects | Creates a `TaskHistory` entry: `changeType: "Task created"`, `username: currentUser.username` |
-| Notes | Position is set to `max(existing positions in column) + 1` |
-
----
+- auth: `ADMIN` or `USER`
+- behavior:
+  - creates a task inside the target column
+  - sets `status = "PLANNED"`
+  - sets `position` to the end of the column
+  - optionally assigns a user
+- history:
+  - always creates `Task created`
+  - additionally creates `Assignee set` when an assignee is provided
 
 ### `updateTask(taskId, data)`
 
-```ts
-async function updateTask(
-  taskId: string,
-  data: {
-    title?: string;
-    description?: string | null;
-    priority?: Priority;
-  }
-): Promise<Task>
-```
-
-| | |
-|---|---|
-| Required role | ADMIN or USER |
-| Returns | Updated task |
-| Side effects | Creates `TaskHistory` entries for each changed field: `"Title changed"`, `"Description changed"`, `"Priority changed"` (with `detail: "OLD → NEW"` for priority) |
-
----
+- auth: `ADMIN` or `USER`
+- editable fields:
+  - `title`
+  - `description`
+  - `priority`
+  - `assigneeId`
+- history entries are created for changed fields
 
 ### `deleteTask(taskId)`
 
-```ts
-async function deleteTask(taskId: string): Promise<void>
-```
-
-| | |
-|---|---|
-| Required role | ADMIN or USER |
-| Notes | Cascade deletes all `TaskHistory` entries for the task |
-
----
+- auth: `ADMIN` or `USER`
+- deletes the task and its history via DB cascade
 
 ### `moveTask(taskId, targetColumnId, newPosition)`
 
-```ts
-async function moveTask(
-  taskId: string,
-  targetColumnId: string,
-  newPosition: number
-): Promise<void>
-```
-
-| | |
-|---|---|
-| Required role | ADMIN or USER |
-| Notes | Runs inside a `prisma.$transaction`. Shifts sibling task positions in both source and target columns. See [database.md](database.md) for the algorithm detail. |
-
----
+- auth: `ADMIN` or `USER`
+- used by: board drag-and-drop persistence
+- behavior:
+  - same-column reorder or cross-column move
+  - shifts sibling positions transactionally
 
 ### `reorderColumns(columnId, newPosition)`
 
-```ts
-async function reorderColumns(columnId: string, newPosition: number): Promise<void>
-```
-
-| | |
-|---|---|
-| Required role | ADMIN |
-| Notes | Runs inside a `prisma.$transaction`. Shifts sibling column positions within the same board. |
-
----
+- auth: `ADMIN`
+- used by: column drag-and-drop persistence
+- shifts sibling column positions transactionally
 
 ### `getTaskHistory(taskId)`
 
-```ts
-async function getTaskHistory(taskId: string): Promise<TaskHistory[]>
-```
+- auth: any authenticated user
+- returns: task history ordered by `createdAt desc`
 
-| | |
-|---|---|
-| Required role | Any authenticated user |
-| Returns | All history entries for the task, ordered by `createdAt desc` |
+## Backlog/tasks actions
 
----
+These power the `TasksView` table and `useBacklogStore`.
 
-## Auth Actions (`src/lib/auth-actions.ts`)
+### `getBacklogTasks()`
+
+- auth: any authenticated user
+- returns: all tasks by `createdAt desc`
+- includes:
+  - assignee preview
+  - column summary
+  - board summary through the column relation
+
+### `getBoardSummaries()`
+
+- auth: any authenticated user
+- returns: `{ id, title }` for assignment dropdowns
+
+### `createBacklogTask(title, description?, priority?, status?, assigneeId?)`
+
+- auth: `ADMIN` or `USER`
+- creates a task without assigning it to a board column
+- history:
+  - creates `Task created`
+
+### `updateBacklogTask(taskId, data)`
+
+- auth: `ADMIN` or `USER`
+- editable fields:
+  - `title`
+  - `description`
+  - `priority`
+  - `status`
+  - `assigneeId`
+- special rule:
+  - if the task is currently assigned to a board (`columnId` present), the action throws when trying to set a non-`PLANNED` status
+- history:
+  - creates entries for changed title, description, priority, status, and assignee changes
+
+### `deleteBacklogTask(taskId)`
+
+- auth: `ADMIN` or `USER`
+- deletes the task
+
+### `assignTaskToBoard(taskId, boardId)`
+
+- auth: `ADMIN` or `USER`
+- behavior:
+  - finds the board’s leftmost column
+  - appends the task to that column
+  - sets `status = "PLANNED"`
+  - writes `Assigned to board` history with board title
+
+### `unassignTaskFromBoard(taskId)`
+
+- auth: `ADMIN` or `USER`
+- behavior:
+  - clears `columnId`
+  - sets `status = "NEW"`
+  - resets `position = 0`
+  - writes `Removed from board` history with the previous board title
+
+This behavior applies only to explicit unassignment through the action. Board deletion follows the database relation path instead and does not reset status.
+
+## Auth actions (`src/lib/auth-actions.ts`)
 
 ### `login(username, password)`
 
-```ts
-async function login(
-  username: string,
-  password: string
-): Promise<{ success: boolean; error?: string; user?: SafeUser }>
-```
-
-| | |
-|---|---|
-| Required role | None (public) |
-| Returns | `{ success: true, user }` on success; `{ success: false, error: "Invalid username or password" }` on failure |
-| Side effects | Sets `kanban_session` HTTP-only cookie on success |
-| Notes | Error message is generic regardless of whether username or password was wrong (prevents username enumeration) |
-
----
+- auth: public
+- success: `{ success: true, user }`
+- failure: `{ success: false, error: "Invalid username or password" }`
 
 ### `logout()`
 
-```ts
-async function logout(): Promise<void>
-```
-
-Deletes the `kanban_session` cookie.
-
----
+- auth: authenticated session implied
+- clears the cookie session
 
 ### `getCurrentUser()`
 
-```ts
-async function getCurrentUser(): Promise<SafeUser | null>
-```
-
-Calls `getSession()`. Returns the currently authenticated user or `null`.
-
----
+- auth: reads the current cookie session
+- returns: safe user or `null`
 
 ### `createUser(data)`
 
-```ts
-async function createUser(data: {
-  firstName: string;
-  lastName: string;
-  username: string;
-  password: string;
-  role: string;
-}): Promise<{ success: boolean; error?: string }>
-```
-
-| | |
-|---|---|
-| Required role | ADMIN |
-| Returns | `{ success: true }` or `{ success: false, error: "Username already exists" }` |
-
----
-
-### `getUsers()`
-
-```ts
-async function getUsers(): Promise<SafeUser[]>
-```
-
-| | |
-|---|---|
-| Required role | ADMIN |
-| Returns | All users ordered by `createdAt asc`, without `passwordHash` |
-
----
-
-### `updateUser(userId, data)`
-
-```ts
-async function updateUser(
-  userId: string,
-  data: {
-    firstName?: string;
-    lastName?: string;
-    username?: string;
-    role?: string;
-  }
-): Promise<{ success: boolean; error?: string }>
-```
-
-| | |
-|---|---|
-| Required role | ADMIN |
-| Returns | `{ success: true }` or `{ success: false, error }` |
-| Notes | Checks username uniqueness before updating. Role change takes effect on the user's next authenticated request. |
-
----
-
-### `deleteUser(userId)`
-
-```ts
-async function deleteUser(userId: string): Promise<{ success: boolean; error?: string }>
-```
-
-| | |
-|---|---|
-| Required role | ADMIN |
-| Returns | `{ success: false, error: "You cannot delete your own account" }` if the caller tries to delete themselves |
-
----
+- auth: `ADMIN`
+- creates a user after uniqueness check on username
 
 ### `changePassword(currentPassword, newPassword)`
 
-```ts
-async function changePassword(
-  currentPassword: string,
-  newPassword: string
-): Promise<{ success: boolean; error?: string }>
-```
+- auth: any authenticated user
+- verifies current password first
 
-| | |
-|---|---|
-| Required role | Any authenticated user |
-| Notes | Requires the current password. Does not log out existing sessions. |
+### `getUsers()`
 
----
+- auth: `ADMIN`
+- returns admin-manageable user list
+
+### `updateUser(userId, data)`
+
+- auth: `ADMIN`
+- updates first name, last name, username, and/or role
+- rejects duplicate usernames
+
+### `deleteUser(userId)`
+
+- auth: `ADMIN`
+- rejects deleting the current admin user
 
 ### `resetPassword(userId, newPassword)`
 
-```ts
-async function resetPassword(
-  userId: string,
-  newPassword: string
-): Promise<{ success: boolean; error?: string }>
-```
+- auth: `ADMIN`
+- enforces minimum length 6
 
-| | |
+## Where actions are called from
+
+| Area | Primary caller |
 |---|---|
-| Required role | ADMIN |
-| Notes | Does not require knowing the old password. Minimum 6 characters enforced. Does not invalidate existing sessions for the target user. |
-
----
-
-## Error handling convention
-
-| Scenario | Behavior |
-|---|---|
-| No session cookie | `requireAuth()` throws `Error("Unauthorized")` |
-| Wrong role | `requireRole()` throws `Error("Forbidden")` |
-| Business rule violation (e.g. delete column with tasks) | Server Action throws a descriptive `Error` |
-| Recoverable failure (e.g. duplicate username) | Returns `{ success: false, error: string }` |
-| Task/column/user not found | Returns `{ success: false, error: "... not found" }` or throws depending on the action |
-
-Callers in the Zustand store catch thrown errors. For optimistic DnD operations, a caught error triggers `getBoards()` to roll back local state.
+| Board CRUD and DnD | `src/lib/store.ts` |
+| Backlog/tasks workflow | `src/lib/backlog-store.ts` |
+| Login/session | `src/lib/auth-store.ts` |
+| User management | `src/components/kanban/user-management-dialog.tsx` |
+| Profile/password | `src/components/kanban/user-profile-dialog.tsx` |
+| Task history modal | `src/components/kanban/task-history-dialog.tsx` |

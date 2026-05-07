@@ -1,8 +1,15 @@
 # Kanban — Project Documentation
 
-## What is this?
+## What this app is
 
-A full-stack kanban board application built with Next.js 16 App Router. All data mutations happen via **Next.js Server Actions** — there is no separate REST API. The single page at `/` serves both the authenticated board UI and the login screen, controlled by a client-side `AuthGuard` component.
+This repository contains a full-stack kanban and backlog management app built with Next.js 16 App Router, Prisma 7, Turso/LibSQL, and Zustand.
+
+The authenticated UI has **two primary surfaces**:
+
+- **Boards view** — classic kanban boards with columns, drag-and-drop, and column/task management.
+- **Tasks view** — a backlog table for all tasks, including unassigned tasks, board assignment, status management, and assignee management.
+
+All data mutations happen through **Next.js Server Actions**. There are **no REST API routes** and no middleware-based auth layer.
 
 ## Tech stack
 
@@ -12,51 +19,50 @@ A full-stack kanban board application built with Next.js 16 App Router. All data
 | UI library | React | 19.2.4 |
 | Language | TypeScript | 5 |
 | Styling | Tailwind CSS | 4 |
-| Component primitives | shadcn/ui (Base UI) | @base-ui/react 1.3.0 |
+| Component primitives | shadcn/ui over `@base-ui/react` | `@base-ui/react` 1.3.0 |
 | Drag-and-drop | dnd-kit | core 6.3.1 / sortable 10.0.0 |
 | State management | Zustand | 5.0.12 |
 | ORM | Prisma | 7.5.0 |
-| Database adapter | LibSQL (@prisma/adapter-libsql) | 7.5.0 |
-| Database | SQLite (local) / Turso (production) | — |
-| Auth | PBKDF2-SHA512 + HTTP-only cookies | (Web Crypto API) |
+| Database adapter | `@prisma/adapter-libsql` | 7.5.0 |
+| Database | SQLite locally / Turso remotely | — |
+| Auth | PBKDF2-SHA512 + HTTP-only cookie session | Web Crypto API |
 | Icons | lucide-react | 0.577.0 |
 | Theme | next-themes | 0.4.6 |
 
 ## Repository layout
 
-```
+```text
 kanban/
 ├── src/
 │   ├── app/
-│   │   ├── layout.tsx          # Root layout — ThemeProvider, TooltipProvider, fonts
-│   │   ├── page.tsx            # Entry point (Server Component) — fetches boards, renders BoardShell
-│   │   └── globals.css         # Tailwind import, CSS variables, custom animations
+│   │   ├── layout.tsx          # Root layout, theme + tooltip providers
+│   │   ├── page.tsx            # Server entry point, loads initial boards
+│   │   └── globals.css         # Tailwind import, theme tokens, animations
 │   ├── components/
-│   │   ├── kanban/             # 22 application-specific components
-│   │   └── ui/                 # 13 shadcn/ui primitive components (owned code)
+│   │   ├── kanban/             # App-specific board, task, auth, and user UI
+│   │   └── ui/                 # Owned shadcn/ui component source
 │   ├── generated/
-│   │   └── prisma/             # Prisma client output (gitignored, generated at build)
+│   │   └── prisma/             # Generated Prisma client output
 │   └── lib/
-│       ├── actions.ts          # Board/task/column Server Actions ("use server")
-│       ├── auth-actions.ts     # Auth Server Actions ("use server")
-│       ├── auth.ts             # PBKDF2 hashing, session cookie management
-│       ├── auth-store.ts       # Zustand auth store ("use client")
-│       ├── prisma.ts           # Prisma singleton with LibSQL adapter
-│       ├── store.ts            # Zustand board store ("use client")
-│       ├── types.ts            # Shared TypeScript types
-│       └── utils.ts            # cn() utility (clsx + tailwind-merge)
+│       ├── actions.ts          # Board, task, backlog, history server actions
+│       ├── auth-actions.ts     # Login/user/password server actions
+│       ├── auth.ts             # Password hashing + cookie session helpers
+│       ├── auth-store.ts       # Auth Zustand store
+│       ├── backlog-store.ts    # Backlog/tasks Zustand store
+│       ├── prisma.ts           # Prisma + LibSQL adapter singleton
+│       ├── store.ts            # Board Zustand store
+│       ├── types.ts            # Shared domain types
+│       └── utils.ts            # cn() helper
 ├── prisma/
-│   ├── schema.prisma           # 5 models: User, Board, Column, Task, TaskHistory
-│   ├── migrations/             # 3 SQL migration files
-│   └── seed.ts                 # Seeds admin user + sample board
+│   ├── schema.prisma           # Current data model
+│   ├── migrations/             # SQL migrations
+│   └── seed.ts                 # Seed admin user + sample board
 ├── scripts/
-│   └── migrate-turso.ts        # Custom migration runner (replaces prisma migrate deploy)
-├── public/                     # Static assets
-├── doc/                        # This documentation
-├── CLAUDE.md / AGENTS.md       # Agent instructions
+│   └── migrate-turso.ts        # Custom migration runner
+├── doc/                        # Project documentation
 ├── next.config.ts
 ├── prisma.config.ts
-├── components.json             # shadcn/ui config
+├── components.json
 └── package.json
 ```
 
@@ -64,33 +70,35 @@ kanban/
 
 | Document | Contents |
 |---|---|
-| [architecture.md](architecture.md) | Request lifecycle, Server/Client boundary, data mutation pattern, key decisions |
-| [database.md](database.md) | All 5 models, position management algorithm, migrations, Prisma client setup |
-| [authentication.md](authentication.md) | Password hashing, session cookies, RBAC permission table, security notes |
-| [server-actions.md](server-actions.md) | Full reference for every exported Server Action |
-| [components.md](components.md) | Component hierarchy, per-component docs, shadcn/ui notes, styling |
-| [state-management.md](state-management.md) | Both Zustand stores, optimistic update pattern, initialization order |
-| [setup.md](setup.md) | Local dev, environment variables, production Turso, npm scripts, gotchas |
-| [feature-drag-and-drop.md](feature-drag-and-drop.md) | dnd-kit setup, collision detection, re-entry guard refs |
-| [feature-user-management.md](feature-user-management.md) | Admin UI walkthrough, CRUD flows, role behavior |
+| [architecture.md](architecture.md) | Request lifecycle, board/tasks view split, Server/Client boundary, data flow |
+| [database.md](database.md) | Current Prisma schema, task status/assignee model, delete behavior, migrations |
+| [authentication.md](authentication.md) | Password hashing, cookie session design, roles, security notes |
+| [server-actions.md](server-actions.md) | Full catalog of board, backlog, auth, and user server actions |
+| [components.md](components.md) | Board UI, tasks/backlog UI, dialogs, shared primitives |
+| [state-management.md](state-management.md) | All three Zustand stores and how they interact |
+| [setup.md](setup.md) | Local setup, Turso deployment, migrations, scripts, gotchas |
+| [feature-drag-and-drop.md](feature-drag-and-drop.md) | dnd-kit implementation for the board surface |
+| [feature-user-management.md](feature-user-management.md) | Admin CRUD flows, reset password, self-service profile/password |
 
 ## Quick start
-
-See [setup.md](setup.md) for a step-by-step guide. The short version:
 
 ```bash
 npm install
 # create .env with TURSO_DATABASE_URL=file:./dev.db
 npx prisma generate
 npm run db:migrate
+# warning: the next command deletes existing app data before reseeding
 npx prisma db seed
 npm run dev
-# → http://localhost:3000  (login: admin / admin_772099)
+# → http://localhost:3000
+# login: admin / admin_772099
 ```
+
+After login, use the sidebar to switch between **Tasks** and **Boards**.
 
 ## Default credentials
 
-The seed script (`prisma/seed.ts`) creates a single admin user:
+The seed script creates a single admin user:
 
 | Field | Value |
 |---|---|
@@ -98,4 +106,4 @@ The seed script (`prisma/seed.ts`) creates a single admin user:
 | Password | `admin_772099` |
 | Role | `ADMIN` |
 
-**Change this password before any public or shared deployment.**
+Change this password before any shared or public deployment.

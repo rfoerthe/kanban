@@ -1,250 +1,209 @@
 # Frontend Components
 
-## Component hierarchy
+## Top-level hierarchy
 
-```
-src/app/page.tsx  (Server Component)
-└── BoardShell  (Client, Server/Client boundary)
+```text
+src/app/page.tsx (Server Component)
+└── BoardShell (Client)
     └── AuthGuard
         ├── [unauthenticated] LoginForm
         └── [authenticated]
             ├── Sidebar
-            │   └── CreateBoardDialog
-            ├── BoardHeader
-            │   ├── CreateColumnDialog
-            │   ├── EditBoardDialog
-            │   ├── UserProfileDialog
-            │   ├── UserManagementDialog  (ADMIN only)
-            │   └── ThemeToggle
-            └── main
-                ├── [no board] EmptyState
-                └── [board selected] KanbanBoard
-                    └── KanbanColumn  (per column)
-                        ├── CreateTaskDialog
-                        ├── EditColumnDialog
-                        └── TaskCard  (per task)
-                            ├── EditTaskDialog
-                            └── TaskHistoryDialog
+            └── [activeView]
+                ├── boards
+                │   ├── BoardHeader
+                │   └── main
+                │       ├── EmptyState
+                │       └── KanbanBoard
+                │           └── KanbanColumn
+                │               └── TaskCard
+                └── tasks
+                    └── TasksView
 ```
 
----
-
-## Kanban components (`src/components/kanban/`)
-
-### `auth-guard.tsx`
-
-Gate component that wraps the entire authenticated UI.
-
-**Props:** `{ children: React.ReactNode }`
-
-**Behavior:**
-- On mount, calls `useAuthStore.initialize()` once (guarded by `isInitialized` flag).
-- Second `useEffect` watches `user`: triggers `fetchBoards()` once on first login (guarded by `hasFetchedRef` to prevent double-fetch on re-renders); resets the ref on logout.
-- While `!isInitialized || isLoading`: renders a centered `Loader2` spinner.
-- If `user === null`: renders `<LoginForm />`.
-- Otherwise: renders `children`.
-
-**Stores:** reads `useAuthStore` (user, isLoading, isInitialized, initialize), `useBoardStore` (fetchBoards)
-
----
+## Shell and navigation
 
 ### `board-shell.tsx`
 
-Main layout container. The Server/Client boundary.
+Main authenticated shell.
 
-**Props:** `{ initialBoards: BoardWithColumns[] }`
+Responsibilities:
 
-**Behavior:**
-- Hydrates the Zustand board store with `initialBoards` on mount via `setBoards()`.
-- If no `activeBoardId` and boards exist, sets the first board as active.
-- Manages `sidebarOpen` local state (toggleable).
-- Renders `Sidebar`, `BoardHeader`, and either `KanbanBoard` or `EmptyState` based on whether an active board exists.
-- Wraps everything in `AuthGuard`.
-
-**Stores:** reads/writes `useBoardStore` (boards, activeBoardId, setBoards, setActiveBoardId, getActiveBoard)
-
----
-
-### `kanban-board.tsx`
-
-Drag-and-drop root. See [feature-drag-and-drop.md](feature-drag-and-drop.md) for full detail.
-
-**Props:** `{ board: BoardWithColumns }`
-
-**Behavior:**
-- Sets up `DndContext` with `PointerSensor` (5px activation threshold) and `KeyboardSensor`.
-- Custom collision detection: prioritizes `pointerWithin`; returns the column droppable directly for empty columns.
-- Three `useRef` guards prevent re-entrant `handleDragOver` loops.
-- On drag end: calls `reorderColumnOptimistic` + `persistColumnReorder` for column drags, or `persistTaskMove` for task drags.
-- Renders columns inside `SortableContext` (horizontal strategy).
-- `DragOverlay` via `createPortal` to `document.body` shows the active task card during drag.
-
-**Stores:** reads/writes `useBoardStore` (moveTaskOptimistic, persistTaskMove, reorderColumnOptimistic, persistColumnReorder)
-
----
-
-### `kanban-column.tsx`
-
-Individual column with a list of sortable tasks.
-
-**Props:** `{ column: ColumnWithTasks; isOverlay?: boolean }`
-
-**Behavior:**
-- Uses both `useSortable` and `useDroppable` on the same DOM node via a merged callback ref.
-- The `data` object passed to `useSortable` includes `type: "column"` for identification in drag handlers.
-- Shows a task count badge in the header.
-- ADMIN sees a column menu (rename, delete via `EditColumnDialog`).
-- Non-VIEWER users see an "Add Task" button (opens `CreateTaskDialog`).
-- Drag handle is visible only to ADMIN.
-- Tasks rendered inside a `SortableContext` (vertical strategy).
-
-**Stores:** reads `useAuthStore` (user role)
-
----
-
-### `task-card.tsx`
-
-Individual task card.
-
-**Props:** `{ task: TaskWithRelations; isOverlay?: boolean }`
-
-**Behavior:**
-- Uses `useSortable`. Disabled for VIEWER role.
-- Data includes `type: "task"`.
-- Shows priority badge with color coding: LOW (muted), MEDIUM (default), HIGH (destructive).
-- Task history button (clock icon) visible on hover, opens `TaskHistoryDialog`.
-- Edit/delete dropdown menu hidden from VIEWER.
-- `isOverlay` prop: applied to the `DragOverlay` copy, adds `rotate-2` and shadow styles.
-
-**Stores:** reads `useAuthStore` (user role)
-
----
+- hydrates `useBoardStore` from `initialBoards`
+- keeps `sidebarOpen`
+- keeps `activeView: "boards" | "tasks"`
+- switches between the board surface and tasks surface
 
 ### `sidebar.tsx`
 
-Left-side board list.
+Left sidebar with two responsibilities:
 
-**Props:**
-```ts
-{
-  boards: BoardWithColumns[];
-  activeBoardId: string | null;
-  onSelectBoard: (id: string) => void;
-  isOpen: boolean;
-  onToggle: () => void;
-}
-```
+- top-level switch between **Tasks** and **Boards**
+- board list and board creation/deletion controls when the active view is `boards`
 
-**Behavior:**
-- Collapsible (controlled by `isOpen`/`onToggle` from `BoardShell`).
-- "New Board" button visible only to ADMIN, opens `CreateBoardDialog`.
-- Each board item shows the board title. Clicking selects it.
-- ADMIN boards show a delete button that opens an inline confirmation dialog (`AlertDialog`).
+Admin-only behavior:
 
----
+- create board
+- delete board
+
+### `auth-guard.tsx`
+
+Client auth gate for the entire app.
+
+Behavior:
+
+- runs `useAuthStore.initialize()` on mount
+- renders a spinner during initial auth load
+- renders `LoginForm` when unauthenticated
+- renders children when authenticated
+
+## Boards surface
 
 ### `board-header.tsx`
 
-Top bar of the application.
+Header for the boards view.
 
-**Props:** `{ board?: BoardWithColumns; sidebarOpen: boolean; onToggleSidebar: () => void }`
+Features:
 
-**Behavior:**
-- Shows the active board title (or "Select a board" if none).
-- ADMIN sees: "Add Column" button (opens `CreateColumnDialog`), board settings menu (opens `EditBoardDialog` or delete confirmation).
-- All users see: user menu (user name, role badge, "Profile", "User Management" for ADMIN, "Sign out").
-- `ThemeToggle` is always visible.
-- Sidebar toggle button.
+- current board title
+- reopen-sidebar button when collapsed
+- add column button (admin only)
+- rename/delete board menu (admin only)
+- theme toggle
+- profile menu
+- user management entry for admins
 
-**Stores:** reads `useAuthStore` (user, logout), `useBoardStore` (deleteBoard)
+### `kanban-board.tsx`
 
----
+Root dnd-kit board canvas.
+
+Responsibilities:
+
+- sensors and collision detection
+- column drag handling
+- task drag handling
+- drag overlay
+- coordination with optimistic store actions
+
+See `feature-drag-and-drop.md` for details.
+
+### `kanban-column.tsx`
+
+Column card that is both sortable and droppable.
+
+Features:
+
+- column drag handle for admins
+- add task buttons for non-viewers
+- rename/delete column menu for admins
+- empty-column droppable state
+- renders `TaskCard` inside a `SortableContext`
+
+### `task-card.tsx`
+
+Interactive task card in the board view.
+
+Features:
+
+- sortable task handle for non-viewers
+- priority badge
+- assignee initials badge when assigned
+- “assign to me” quick action for non-viewers when task is assigned to someone else or unassigned
+- history dialog trigger
+- edit/delete menu for non-viewers
+
+### Board dialogs
+
+| Component | Purpose |
+|---|---|
+| `create-board-dialog.tsx` | Create a board |
+| `edit-board-dialog.tsx` | Rename a board |
+| `create-column-dialog.tsx` | Create a column |
+| `edit-column-dialog.tsx` | Rename a column |
+| `create-task-dialog.tsx` | Create a board task with title, description, priority, assignee |
+| `edit-task-dialog.tsx` | Edit a board task with title, description, priority, assignee |
+| `task-history-dialog.tsx` | Show task history entries |
+
+`create-task-dialog.tsx` and `edit-task-dialog.tsx` both call `getAssignableUsers()` when opened so assignee options are current.
+
+## Tasks/backlog surface
+
+### `tasks-view.tsx`
+
+Table-based backlog and assignment surface.
+
+Features:
+
+- fetches all backlog tasks via `useBacklogStore`
+- fetches board summaries for assignment dropdowns
+- shows title, status, priority, assignee, and board
+- create/edit/delete task actions for non-viewers
+- assign/unassign task to board
+- profile menu and admin user-management entry
+
+This surface does **not** use drag-and-drop.
+
+### Backlog dialogs
+
+| Component | Purpose |
+|---|---|
+| `create-backlog-task-dialog.tsx` | Create a backlog task with title, description, priority, status, assignee |
+| `edit-backlog-task-dialog.tsx` | Edit backlog task title, description, priority, status, assignee |
+
+Notes:
+
+- The create dialog exposes `NEW`, `DONE`, and `REVOKED` in the status picker.
+- The edit dialog disables status changes when the current task is `PLANNED`.
+- The server action layer also blocks non-`PLANNED` status changes while a task is assigned to a board.
+
+## Auth and user components
 
 ### `login-form.tsx`
 
-Full-screen centered login form.
+Full-screen login form used by `AuthGuard`.
 
-**Behavior:**
-- Controlled form with username + password fields.
-- Calls `useAuthStore.login()` on submit.
-- Shows error message on failure.
-- Disables the submit button while `isLoading`.
+### `user-profile-dialog.tsx`
 
-**Stores:** reads/writes `useAuthStore` (login, isLoading)
+Current-user profile surface, including self-service password change.
 
----
+### `user-management-dialog.tsx`
 
-### `empty-state.tsx`
+Admin-only user management modal with four internal views:
 
-Shown in the main area when no board is selected or no boards exist.
+- list
+- create
+- edit
+- reset-password
 
-**Props:** none
+It is reachable from both `BoardHeader` and `TasksView`.
 
-Simple centered illustration with text.
+### `create-user-dialog.tsx`
 
----
+Additional admin user creation dialog source in the repo. The main admin flow is currently centered around `user-management-dialog.tsx`.
 
-### `theme-toggle.tsx`
+## Shared UI primitives
 
-Dark/light mode toggle button.
+All files under `src/components/ui/` are owned source code, not runtime imports from a UI package.
 
-Uses `useTheme()` from `next-themes` to toggle between `"light"` and `"dark"`. Renders a Sun or Moon icon.
+Commonly used primitives include:
 
----
+- `button.tsx`
+- `dialog.tsx`
+- `dropdown-menu.tsx`
+- `input.tsx`
+- `label.tsx`
+- `select.tsx`
+- `textarea.tsx`
+- `badge.tsx`
+- `scroll-area.tsx`
+- `tooltip.tsx`
+- `separator.tsx`
 
-### Dialog components
-
-All dialogs are **controlled** — they receive `open` and `onOpenChange` props (or manage their own open state with a trigger button).
-
-| Component | Trigger | What it does |
-|---|---|---|
-| `create-board-dialog.tsx` | Sidebar "New Board" | Creates a board via `useBoardStore.createBoard()` |
-| `edit-board-dialog.tsx` | Board header menu | Renames a board via `useBoardStore.updateBoard()` |
-| `create-column-dialog.tsx` | Board header "Add Column" | Adds a column via `useBoardStore.createColumn()` |
-| `edit-column-dialog.tsx` | Column header menu | Renames or provides delete trigger for a column |
-| `create-task-dialog.tsx` | Column "Add Task" | Creates a task with title, description, priority via `useBoardStore.createTask()` |
-| `edit-task-dialog.tsx` | Task card menu | Edits task title, description, priority via `useBoardStore.updateTask()` |
-| `task-history-dialog.tsx` | Task card clock icon | Calls `getTaskHistory()` Server Action directly on open, displays history entries |
-| `user-profile-dialog.tsx` | Header user menu "Profile" | Shows current user info, change-password form via `useAuthStore.changePassword()` |
-| `user-management-dialog.tsx` | Header user menu "User Management" (ADMIN) | Full user CRUD UI — see [feature-user-management.md](feature-user-management.md) |
-| `create-user-dialog.tsx` | User management list | Creates a new user via `createUser()` auth action |
-
----
-
-## shadcn/ui components (`src/components/ui/`)
-
-These are **owned source files** — not imported from a package. They were generated by the shadcn CLI and can be freely modified.
-
-| Component | Used by |
-|---|---|
-| `badge.tsx` | Task priority badge, user role badge |
-| `button.tsx` | All interactive buttons |
-| `card.tsx` | Task cards |
-| `dialog.tsx` | All modal dialogs |
-| `dropdown-menu.tsx` | Board/column/task action menus, user menu |
-| `input.tsx` | All text inputs |
-| `label.tsx` | Form labels |
-| `scroll-area.tsx` | Board horizontal scroll, column task scroll |
-| `select.tsx` | Priority selector in task forms |
-| `separator.tsx` | Menu separators |
-| `sheet.tsx` | (Available, not currently in main use) |
-| `textarea.tsx` | Task description field |
-| `tooltip.tsx` | Icon button tooltips |
-
-**Important:** This project uses `@base-ui/react` primitives, not Radix UI. The API differs — trigger elements use a `render` prop pattern instead of `asChild`:
-
-```tsx
-// @base-ui/react pattern
-<DropdownMenuTrigger render={<Button variant="ghost" />}>
-  ...
-</DropdownMenuTrigger>
-```
-
----
+This project uses `@base-ui/react`, so trigger patterns follow the `render` prop style rather than Radix’s `asChild` pattern.
 
 ## Styling conventions
 
-- **Tailwind CSS 4** with `@import "tailwindcss"` in `globals.css` (no `tailwind.config.js`).
-- `cn()` utility from `src/lib/utils.ts` merges class names: `clsx` for conditionals, `tailwind-merge` to resolve conflicts.
-- CSS variables for theme colors defined in `globals.css` under `:root` and `.dark`.
-- Custom animations: `animate-kanban-fade-in` and `animate-kanban-slide-in`.
+- Tailwind CSS 4 with CSS-first config in `src/app/globals.css`
+- `cn()` helper from `src/lib/utils.ts`
+- theme tokens live in CSS variables
+- custom app animation classes are used throughout the kanban UI

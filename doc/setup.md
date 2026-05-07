@@ -2,117 +2,115 @@
 
 ## Prerequisites
 
-- **Node.js 22.x** — required by the `engines` field in `package.json`. Use nvm or similar to manage versions.
-- **npm** — bundled with Node.js.
-- A `.env` file at the project root (see Environment variables below).
+- **Node.js 22.x**
+- **npm**
+- a project-root `.env` file
 
----
-
-## Local development (SQLite)
+## Local development
 
 ```bash
-# 1. Install dependencies
 npm install
-
-# 2. Create environment file
 echo "TURSO_DATABASE_URL=file:./dev.db" > .env
-
-# 3. Generate the Prisma client (outputs to src/generated/prisma/)
 npx prisma generate
-
-# 4. Apply all migrations to create the local SQLite database
 npm run db:migrate
-
-# 5. Seed the database with the admin user and sample board
 npx prisma db seed
-
-# 6. Start the development server
 npm run dev
 ```
 
-Open http://localhost:3000 and log in as `admin` / `admin_772099`.
+Warning: `npx prisma db seed` is destructive in the current implementation. The seed script clears existing tasks, columns, boards, and users before recreating the default admin account and sample board.
 
----
+Then open `http://localhost:3000` and log in with:
+
+- username: `admin`
+- password: `admin_772099`
 
 ## Environment variables
 
 | Variable | Required | Example | Notes |
 |---|---|---|---|
-| `TURSO_DATABASE_URL` | Yes | `file:./dev.db` | Local SQLite file for dev; Turso URL for production |
-| `TURSO_AUTH_TOKEN` | Production only | `eyJ...` | Not needed for local SQLite file |
+| `TURSO_DATABASE_URL` | yes | `file:./dev.db` | local SQLite or remote LibSQL URL |
+| `TURSO_AUTH_TOKEN` | production only | `eyJ...` | omitted for local file-based SQLite |
 
-The `TURSO_AUTH_TOKEN` can be omitted when `TURSO_DATABASE_URL` is a `file:` path. The LibSQL client does not require an auth token for local files.
+## Production and deployment
 
----
+Build script:
 
-## Production (Turso)
+```bash
+npm run build
+```
 
-1. Create a Turso database: https://turso.tech/
-2. Get the database URL (`libsql://your-db.turso.io`) and auth token.
-3. Set environment variables on your hosting platform:
-   ```
-   TURSO_DATABASE_URL=libsql://your-db.turso.io
-   TURSO_AUTH_TOKEN=eyJ...
-   ```
-4. Deploy. The build command runs migrations automatically:
-   ```bash
-   npm run build
-   # equivalent to: prisma generate && npx tsx scripts/migrate-turso.ts && next build
-   ```
+Current build command:
 
-The custom migration script (`scripts/migrate-turso.ts`) is used instead of `prisma migrate deploy` because Prisma's built-in deploy command does not support the libsql protocol. The script:
-- Creates a `_prisma_migrations` table if it doesn't exist.
-- Reads migration SQL files from `prisma/migrations/` in alphabetical order.
-- Skips migrations already recorded in `_prisma_migrations`.
-- Applies new migrations using `client.executeMultiple()`.
+```bash
+prisma generate && npx tsx scripts/migrate-turso.ts && next build
+```
 
----
+That means production builds also:
 
-## Adding a new migration
+1. regenerate Prisma client output
+2. run pending SQL migrations through the custom LibSQL script
+3. build the Next.js app
 
-1. Edit `prisma/schema.prisma` with your changes.
-2. Generate the migration SQL file:
-   ```bash
-   npx prisma migrate dev --name describe_the_change
-   ```
-   This creates a new folder under `prisma/migrations/` with a `migration.sql` file.
-3. Regenerate the Prisma client:
-   ```bash
-   npx prisma generate
-   ```
-4. Commit the new migration folder and the updated schema.
-5. On next deploy, `npm run build` will apply the migration automatically.
+## Migrations
 
----
+Apply pending migrations manually:
 
-## npm scripts
+```bash
+npm run db:migrate
+```
 
-| Script | Command | Description |
-|---|---|---|
-| `dev` | `next dev` | Start the development server with hot reload |
-| `build` | `prisma generate && npx tsx scripts/migrate-turso.ts && next build` | Production build: generate client, run migrations, build Next.js |
-| `start` | `next start` | Start the production server (requires a build first) |
-| `lint` | `eslint` | Run ESLint |
-| `db:migrate` | `npx tsx scripts/migrate-turso.ts` | Apply pending migrations without a full build |
+Create a new migration after changing `prisma/schema.prisma`:
 
----
+```bash
+npx prisma migrate dev --name describe_the_change
+npx prisma generate
+```
 
-## Common gotchas
+`scripts/migrate-turso.ts` replaces `prisma migrate deploy` for deploy-time application because the LibSQL path is handled manually.
 
-**`src/generated/prisma/` is gitignored.**
-You must run `npx prisma generate` on every fresh checkout before building or starting the dev server. The build script does this automatically.
+## Seed behavior
 
-**Tailwind CSS 4 has no `tailwind.config.js`.**
-Configuration is done via CSS at the top of `src/app/globals.css` using `@import "tailwindcss"` and `@theme`. If you need to add custom tokens, add them there.
+`prisma/seed.ts` currently:
 
-**shadcn/ui uses `@base-ui/react`, not Radix UI.**
-The component API differs. Trigger elements use a `render` prop instead of `asChild`. Check the existing components in `src/components/ui/` for the correct patterns before adding new ones.
+- recreates the default admin user
+- creates a sample board called `Project Board`
+- seeds four board columns and sample tasks
+- begins by deleting existing tasks, columns, boards, and users
 
-**`"use server"` and `"use client"` directives must be the first line.**
-No comments, imports, or blank lines before the directive. Violating this causes a build error.
+## Useful scripts
 
-**The `TURSO_AUTH_TOKEN` env var can be `undefined` for local files.**
-The `createClient` call passes `authToken: process.env.TURSO_AUTH_TOKEN` — if the variable is not set, it's `undefined`, which is valid for local SQLite but required for remote Turso connections.
+| Script | Command |
+|---|---|
+| `dev` | `next dev` |
+| `build` | `prisma generate && npx tsx scripts/migrate-turso.ts && next build` |
+| `start` | `next start` |
+| `lint` | `eslint` |
+| `db:migrate` | `npx tsx scripts/migrate-turso.ts` |
 
-**`prisma migrate deploy` will not work.**
-Always use `npm run db:migrate` or the build script to apply migrations. See the migration section above.
+## Gotchas
+
+### Generated Prisma client lives outside the default location
+
+The client output path is:
+
+```text
+src/generated/prisma/
+```
+
+Run `npx prisma generate` on fresh checkouts before building or running the app.
+
+### Tailwind is CSS-first
+
+There is no classic `tailwind.config.js` in this repo. Theme and tokens live in `src/app/globals.css`.
+
+### UI primitives use `@base-ui/react`
+
+The trigger APIs differ from older Radix-based shadcn examples. Follow existing patterns in `src/components/ui/`.
+
+### Server/client directives matter
+
+`"use server"` and `"use client"` must remain at the top of the relevant files.
+
+### There is no `.env.example`
+
+At the time of writing, local setup depends on manually creating `.env`.

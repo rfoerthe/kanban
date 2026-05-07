@@ -2,116 +2,183 @@
 
 ## Overview
 
-Session-based authentication implemented without third-party auth libraries. All logic lives in two files:
+Authentication is implemented without a third-party auth library.
 
-- `src/lib/auth.ts` — password hashing, session cookie management, `requireAuth`/`requireRole` guards
-- `src/lib/auth-actions.ts` — Server Actions that expose auth operations to client code
+- `src/lib/auth.ts` contains password hashing, cookie session helpers, and role guards.
+- `src/lib/auth-actions.ts` exposes login/logout/user/password server actions.
+- `src/lib/auth-store.ts` keeps the authenticated user in client state.
 
 ## Password hashing
 
-Passwords are hashed using **PBKDF2-SHA512** via the Web Crypto API (`crypto.subtle`).
+Passwords are hashed using **PBKDF2-SHA512** through the Web Crypto API.
 
 | Parameter | Value |
 |---|---|
 | Algorithm | PBKDF2 |
 | Hash | SHA-512 |
 | Iterations | 100,000 |
-| Salt length | 16 bytes (random per password) |
+| Salt length | 16 bytes |
 | Key length | 64 bytes |
 
-Stored format in the database: `saltHex:hashHex`
+Stored format:
 
-```ts
-// src/lib/auth.ts
-export async function hashPassword(password: string): Promise<string>
-export async function verifyPassword(password: string, storedHash: string): Promise<boolean>
+```text
+saltHex:hashHex
 ```
 
-**Security note:** `verifyPassword` re-derives the hash and compares hex strings with `===`. This is not constant-time comparison — it is theoretically vulnerable to timing attacks. For an internal tool this is acceptable; for a public-facing service, use `crypto.timingSafeEqual`.
+Core helpers:
+
+```ts
+hashPassword(password)
+verifyPassword(password, storedHash)
+```
 
 ## Session management
 
-### Creating a session
+### Cookie format
 
-On successful login, `createSession(userId)` generates a 32-byte random session token, encodes it in a base64 JSON payload, and sets an HTTP-only cookie:
+On successful login, `createSession(userId)` stores an HTTP-only cookie named `kanban_session`.
 
-```
-Cookie name:   kanban_session
-Cookie value:  base64(JSON.stringify({ userId, token, createdAt }))
-Flags:         httpOnly: true
-               secure: true (in production only)
-               sameSite: "lax"
-               path: "/"
-               maxAge: 604800 (7 days)
+The cookie value is base64-encoded JSON shaped like:
+
+```json
+{ "userId": "...", "token": "...", "createdAt": 1234567890 }
 ```
 
-### Validating a session
+Cookie settings:
 
-`getSession()` is called on every authenticated request:
+- `httpOnly: true`
+- `secure: process.env.NODE_ENV === "production"`
+- `sameSite: "lax"`
+- `path: "/"`
+- `maxAge: 7 days`
 
-1. Read the `kanban_session` cookie.
-2. Base64-decode and JSON-parse the value.
-3. Extract `userId`.
-4. Call `prisma.user.findUnique({ where: { id: userId } })`.
-5. Return the `SafeUser` (without `passwordHash`) or `null`.
+### Session validation
 
-The `token` field stored in the cookie is **not validated server-side**. The only check is that `userId` resolves to a real user in the database. This means a cookie cannot be invalidated server-side (other than by deleting the user). Logout works by deleting the cookie client-side.
+`getSession()` does the following:
+
+1. Reads `kanban_session`
+2. Base64-decodes the payload
+3. Extracts `userId`
+4. Looks up the user in Prisma
+5. Returns a safe user object or `null`
+
+Important limitation: the stored `token` and `createdAt` values are currently **not validated** server-side. The effective session check is just “does this cookie decode, and does `userId` still exist?”
 
 ### Session helpers
 
 ```ts
-// src/lib/auth.ts
-export async function createSession(userId: string): Promise<void>
-export async function getSession(): Promise<SafeUser | null>
-export async function clearSession(): Promise<void>
-
-// Guards used inside Server Actions
-export async function requireAuth(): Promise<SafeUser>           // throws "Unauthorized" if no session
-export async function requireRole(allowedRoles: string[]): Promise<SafeUser>  // throws "Forbidden" if role not in list
+createSession(userId)
+getSession()
+clearSession()
+requireAuth()
+requireRole(allowedRoles)
 ```
 
-## Role-based access control
+`requireAuth()` throws `Error("Unauthorized")` when no user is available.
 
-Three roles stored as plain strings in the `User.role` field:
+`requireRole()` throws `Error("Forbidden")` if the session user’s role is not allowed.
 
-| Action | ADMIN | USER | VIEWER |
-|---|---|---|---|
-| View boards | yes | yes | yes |
-| Create / edit / delete tasks | yes | yes | no |
-| Drag tasks between columns | yes | yes | no |
-| Create / edit / delete columns | yes | no | no |
-| Drag columns | yes | no | no |
-| Create / edit / delete boards | yes | no | no |
-| Manage users | yes | no | no |
-| Change own password | yes | yes | yes |
+## Login/logout flow
 
-Role checks are enforced **server-side** in every Server Action using `requireRole(["ADMIN"])` or `requireRole(["ADMIN", "USER"])`. The UI also conditionally hides controls based on role (read from `useAuthStore`), but UI hiding alone is not a security boundary.
+### Login
 
-### Checking role in UI
+`login(username, password)` in `src/lib/auth-actions.ts`:
 
-```ts
-const { user } = useAuthStore();
-const isAdmin = user?.role === "ADMIN";
-const isViewer = user?.role === "VIEWER";
+1. Looks up the user by username
+2. Verifies the password hash
+3. Calls `createSession(user.id)`
+4. Returns `{ success: true, user }`
+
+On failure it returns the generic message:
+
+```text
+Invalid username or password
 ```
+
+### Logout
+
+`logout()` calls `clearSession()`, which deletes the cookie.
 
 ## Client-side auth state
 
-The `useAuthStore` Zustand store (see [state-management.md](state-management.md)) holds the current user. The `AuthGuard` component gates the entire application:
+`useAuthStore` keeps:
 
-- Calls `initialize()` on mount (once).
-- Renders a spinner while `!isInitialized || isLoading`.
-- Renders `<LoginForm />` if `user === null`.
-- Renders children if `user` is set.
+- `user`
+- `isLoading`
+- `isInitialized`
 
-The `isInitialized` flag prevents a flash of the login form during the initial session check.
+`AuthGuard` uses this store to gate the app:
+
+- While auth is initializing, it renders a spinner.
+- If no user exists, it renders `LoginForm`.
+- If a user exists, it renders the application shell.
+
+After authentication succeeds, the feature stores fetch domain data.
+
+## Roles
+
+Roles are stored as plain strings in `User.role`:
+
+- `ADMIN`
+- `USER`
+- `VIEWER`
+
+This is enforced at the application layer, not as a Prisma enum.
+
+## Authorization model
+
+### Broad permissions
+
+| Capability | ADMIN | USER | VIEWER |
+|---|---|---|---|
+| View boards and tasks | yes | yes | yes |
+| Create/edit/delete backlog tasks | yes | yes | no |
+| Create/edit/delete board tasks | yes | yes | no |
+| Assign or unassign tasks to boards | yes | yes | no |
+| Drag tasks between columns | yes | yes | no |
+| Create/rename/delete columns | yes | no | no |
+| Create/rename/delete boards | yes | no | no |
+| Manage users | yes | no | no |
+| Change own password | yes | yes | yes |
+
+### UI enforcement
+
+The UI hides or disables actions based on the current role. Examples:
+
+- `VIEWER` cannot create, edit, delete, or drag tasks.
+- Only `ADMIN` sees board management and user management controls.
+- Both `BoardHeader` and `TasksView` expose the profile/user menu.
+
+### Server-side enforcement
+
+The real security boundary is the server action layer:
+
+- `requireAuth()` for authenticated reads
+- `requireRole(["ADMIN"])` for admin-only writes
+- `requireRole(["ADMIN", "USER"])` for most task mutations
+
+## User and password operations
+
+Implemented in `src/lib/auth-actions.ts`:
+
+- `createUser(data)` — admin only
+- `getUsers()` — admin only
+- `updateUser(userId, data)` — admin only
+- `deleteUser(userId)` — admin only, cannot delete self
+- `resetPassword(userId, newPassword)` — admin only
+- `changePassword(currentPassword, newPassword)` — any authenticated user
+
+Password length validation is enforced in the auth actions for reset flows and also reinforced in the client dialogs.
 
 ## Security notes
 
-This implementation is appropriate for an internal or development tool. Before public deployment, consider:
+This implementation is suitable for internal use or low-risk deployments, but it has important tradeoffs:
 
-1. **No CSRF protection** beyond `sameSite: "lax"`. Add CSRF tokens for state-mutating actions if the app becomes public-facing.
-2. **Token not validated server-side.** The session token in the cookie is a random string but is never checked against a server-side store. Add a server-side token store if you need forced logout or session revocation.
-3. **No rate limiting** on the `login()` Server Action. Add rate limiting (e.g. via middleware) before exposing to the internet.
-4. **Minimum password length is 6 characters** (enforced only in `resetPassword`). Consider enforcing this in `createUser` and `changePassword` as well.
-5. **Non-constant-time password comparison.** See the note in the Password hashing section above.
+1. **No server-side session store.** Sessions cannot be centrally revoked.
+2. **Token and createdAt are not validated.** The cookie payload carries more data than the server currently checks.
+3. **No CSRF-specific protection** beyond `sameSite: "lax"`.
+4. **No rate limiting** on login.
+5. **Password comparison uses `===` on hex strings**, not a timing-safe comparison.
+
+If the app becomes public-facing, those areas should be hardened first.

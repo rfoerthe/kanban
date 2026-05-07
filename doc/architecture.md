@@ -1,110 +1,145 @@
 # Architecture
 
+## High-level shape
+
+This app is a **single-route authenticated application** served from `/`.
+
+- `src/app/page.tsx` is the only route entry in the app surface documented here.
+- `src/components/kanban/board-shell.tsx` is the main client shell.
+- The shell can render either:
+  - **Boards view** via `BoardHeader` + `KanbanBoard`
+  - **Tasks view** via `TasksView`
+
+There are no API routes. Client components call server actions directly.
+
 ## Request lifecycle
 
 1. Browser navigates to `/`.
-2. Next.js runs `src/app/page.tsx` as an async **Server Component**.
-3. `page.tsx` calls `getBoards()` (a Server Action). Because there is no valid session cookie on first visit, `getBoards` throws and the catch returns an empty array.
-4. `page.tsx` renders `<BoardShell initialBoards={[]} />`. `BoardShell` is a **Client Component** — this is the Server/Client boundary.
-5. `BoardShell` wraps everything in `<AuthGuard>`. On mount, `AuthGuard` calls `useAuthStore.initialize()`, which calls the `getCurrentUser()` Server Action.
-6. While initializing, `AuthGuard` renders a spinner. On success it renders children; on failure (no session) it renders `<LoginForm />`.
-7. After a successful login, `AuthGuard` triggers `fetchBoards()` from the board store, which hydrates the Zustand store with all boards.
-8. All subsequent user interactions call Server Actions directly from client code — no `fetch()`, no REST endpoints.
+2. Next.js runs `src/app/page.tsx` as an async Server Component.
+3. `page.tsx` attempts `getBoards()` from `src/lib/actions.ts`.
+4. If `getBoards()` throws for any reason, `page.tsx` falls back to `[]`.
+5. `page.tsx` renders `<BoardShell initialBoards={boards} />`.
+6. `BoardShell` is a Client Component and therefore the main Server/Client boundary.
+7. `BoardShell` wraps the entire app in `AuthGuard`.
+8. `AuthGuard` calls `useAuthStore.initialize()`, which invokes `getCurrentUser()`.
+9. If authenticated, the user sees the shell and the stores fetch fresh board/task data.
+10. If unauthenticated, the user sees `LoginForm`.
 
 ## Server vs. Client components
 
-| File | Type | Reason |
+| File | Type | Responsibility |
 |---|---|---|
-| `src/app/page.tsx` | Server Component | Fetches initial board data server-side |
-| `src/app/layout.tsx` | Server Component | Static layout shell |
-| `src/components/kanban/board-shell.tsx` | Client Component | Manages sidebar state, owns the Zustand store |
-| Everything in `src/components/kanban/` | Client Component | All interactive UI |
-| `src/lib/actions.ts` | Server Action file | `"use server"` directive |
-| `src/lib/auth-actions.ts` | Server Action file | `"use server"` directive |
+| `src/app/page.tsx` | Server Component | Initial board fetch with graceful fallback |
+| `src/app/layout.tsx` | Server Component | Root layout, providers, metadata |
+| `src/components/kanban/board-shell.tsx` | Client Component | Main authenticated shell, view switching |
+| `src/components/kanban/tasks-view.tsx` | Client Component | Backlog/tasks surface |
+| `src/components/kanban/kanban-board.tsx` | Client Component | Board DnD surface |
+| `src/lib/actions.ts` | Server Actions | Boards, columns, tasks, backlog, history |
+| `src/lib/auth-actions.ts` | Server Actions | Login/logout/user/password operations |
 
-The Server/Client boundary sits at `BoardShell`. Anything above it (page, layout) is server-rendered. Anything it renders is client-rendered.
+## Main UI split
+
+`BoardShell` owns two local UI states:
+
+- `sidebarOpen: boolean`
+- `activeView: "boards" | "tasks"`
+
+The sidebar is not just a board list anymore. It acts as the top-level switcher between:
+
+- **Boards** — board navigation and kanban work
+- **Tasks** — backlog/table work
 
 ## Data mutation pattern
 
-Every mutation follows the same cycle:
+The common mutation path is:
 
-```
+```text
 UI event
   → Zustand store method
-    → call Server Action
-      → server validates session + role (requireAuth / requireRole)
-        → Prisma writes to DB
-          → revalidatePath("/") clears Next.js cache
-    → Zustand state updated locally (no refetch needed)
+    → Server Action
+      → auth/role guard
+        → Prisma write
+          → revalidatePath("/")
+    → local state update in the store
 ```
 
-For drag-and-drop, an **optimistic update** is applied first:
+Examples:
 
-```
-drag event
-  → moveTaskOptimistic() — synchronous Zustand update (instant UI)
-  → persistTaskMove()    — async Server Action (fire-and-forget)
-    → on failure: fetchBoards() to roll back to server state
-```
+- `useBoardStore.createTask()` → `createTask()` server action
+- `useBacklogStore.assignToBoard()` → `assignTaskToBoard()` server action
+- `useAuthStore.login()` → `login()` auth action
+
+## Store architecture
+
+Three Zustand stores divide the app by responsibility:
+
+- `src/lib/auth-store.ts` — current user/session state
+- `src/lib/store.ts` — boards, columns, in-board tasks, optimistic DnD
+- `src/lib/backlog-store.ts` — all tasks table, board assignment, backlog edits
+
+The board and backlog surfaces share the same underlying `Task` model, but present it differently.
+
+## Board vs. backlog model
+
+The current `Task` model supports both board tasks and backlog tasks.
+
+- A task with a `columnId` is placed on a board.
+- A task with `columnId = null` exists only in the backlog/tasks view.
+- Assigning a backlog task to a board sets its `columnId` to the leftmost board column and forces `status = "PLANNED"`.
+- Removing a task from a board sets `columnId = null` and `status = "NEW"`.
+
+Important caveat: explicit removal through `unassignTaskFromBoard()` is not the same as deleting a board. If a board is deleted, Prisma nulls the linked `columnId` values through `onDelete: SetNull`, but task status is not reset by that path. Those tasks reappear in the backlog/tasks surface with `columnId = null` and whatever status they already had, commonly `PLANNED`.
 
 ## Authentication flow
 
-```
+```text
 App mount
-  → AuthGuard.useEffect → initialize()
-    → getCurrentUser() Server Action
-      → reads kanban_session cookie
-        → decodes base64 JSON → extracts userId
-          → prisma.user.findUnique(userId)
-            → returns SafeUser | null
-      → sets useAuthStore.user
-  → if user: AuthGuard renders children + triggers fetchBoards()
-  → if null: AuthGuard renders LoginForm
-
-Login submit
-  → useAuthStore.login(username, password)
-    → login() Server Action
-      → prisma.user.findUnique(username)
-        → verifyPassword(input, storedHash)
-          → createSession(userId) — sets HTTP-only cookie
-      → returns { success, user }
-    → sets useAuthStore.user → AuthGuard re-renders children
+  → AuthGuard.initialize()
+    → getCurrentUser()
+      → getSession()
+        → read kanban_session cookie
+        → decode base64 JSON
+        → lookup prisma.user by userId
+  → if user exists:
+      render app and fetch domain data
+  → else:
+      render LoginForm
 ```
 
-## Database layer
+The session is cookie-based and stateless on the server side. See `authentication.md` for caveats.
 
-Prisma 7 with the LibSQL adapter (`@prisma/adapter-libsql`) connects to:
+## Drag-and-drop architecture
 
-- **Development:** local SQLite file at `./dev.db` via `TURSO_DATABASE_URL=file:./dev.db`
-- **Production:** remote Turso database via `TURSO_DATABASE_URL=libsql://...` and `TURSO_AUTH_TOKEN`
+Only the **Boards** surface uses drag-and-drop.
 
-The Prisma client is generated into `src/generated/prisma/` (not the default location). The singleton is in `src/lib/prisma.ts` with a global cache to prevent connection exhaustion during Next.js hot-reloads:
+- `KanbanBoard` manages the `DndContext`, collision detection, and overlay state.
+- `KanbanColumn` is both sortable and droppable.
+- `TaskCard` is sortable.
+- `useBoardStore` performs optimistic updates.
+- `moveTask()` and `reorderColumns()` persist the final positions server-side.
 
-```ts
-// src/lib/prisma.ts
-const globalForPrisma = global as unknown as { prisma: PrismaClient };
-export const prisma = globalForPrisma.prisma ?? new PrismaClient({ adapter });
-if (process.env.NODE_ENV !== "production") globalForPrisma.prisma = prisma;
-```
+The **Tasks** surface is table-based and does not use DnD.
 
-## Theme system
+## Theme and styling
 
-`next-themes` wraps the root layout. The `dark` class is applied to `<html>`. Tailwind CSS 4 uses `@custom-variant dark (&:is(.dark *))` in `globals.css`.
-
-Two custom animations are defined in `globals.css`:
-- `kanban-fade-in` — opacity 0→1
-- `kanban-slide-in` — translateY(8px)→0 + opacity 0→1
-
-Used via `animate-kanban-fade-in` and `animate-kanban-slide-in` utility classes.
+- `next-themes` wraps the app at the layout level.
+- Tailwind CSS 4 is configured through `src/app/globals.css`.
+- Shared UI primitives live in `src/components/ui/` and are owned source files.
 
 ## Key architectural decisions
 
-**Server Actions instead of API routes** — mutations are co-located with the server logic that executes them; no need to maintain a separate HTTP layer or handle CORS.
+### Server Actions instead of an HTTP API
 
-**Zustand instead of React Query/SWR** — drag-and-drop requires synchronous, mutable state updates (`moveTaskOptimistic`). React Query's async model cannot provide the immediate position changes dnd-kit expects. Zustand's synchronous `set()` does.
+This keeps validation, auth checks, and persistence in one place without building a separate REST layer.
 
-**LibSQL/Turso** — SQLite-compatible wire protocol that works locally as a file and in production as a distributed edge database, with no schema changes required between environments.
+### Zustand instead of React Query/SWR
 
-**shadcn/ui (Base UI)** — components are owned source code in `src/components/ui/`, not a dependency. They can be freely modified. This project uses the newer `@base-ui/react` primitives which have a different API from Radix UI (note the `render` prop pattern on trigger elements).
+The board surface needs synchronous optimistic state changes for dnd-kit. Zustand provides direct mutable update flows that fit DnD better.
 
-**No session store table** — sessions are stateless cookies. Each Server Action that needs auth calls `getSession()`, which decodes the cookie and does a DB lookup by `userId`. This avoids a sessions table but means there is no server-side session invalidation (other than cookie deletion on logout).
+### One `Task` model for both board and backlog work
+
+Using nullable `columnId` and explicit `status` allows a single task entity to exist either in a board column or in the backlog/tasks view.
+
+### Stateless cookie session
+
+The server only rehydrates the session by `userId` from the cookie payload. This keeps the implementation simple, but comes with revocation and validation tradeoffs.

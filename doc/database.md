@@ -2,14 +2,23 @@
 
 ## Overview
 
-SQLite database managed by Prisma 7 with the LibSQL adapter. Five models:
+The app uses Prisma 7 with the LibSQL adapter on top of:
 
-```
+- **local SQLite** during development
+- **remote Turso/LibSQL** in production
+
+Current schema models:
+
+```text
 User
-Board ──< Column ──< Task ──< TaskHistory
+Board ──< Column
+Task ──< TaskHistory
+
+Task ── optional → Column
+Task ── optional → User (assignee)
 ```
 
-Cascade deletes propagate downward: deleting a Board deletes its Columns, which delete their Tasks, which delete their TaskHistory entries.
+The key evolution since the earlier board-only model is that a task can now exist **without a column**, which is how backlog tasks are represented.
 
 ## Models
 
@@ -17,26 +26,22 @@ Cascade deletes propagate downward: deleting a Board deletes its Columns, which 
 
 ```prisma
 model User {
-  id           String   @id @default(cuid())
-  firstName    String
-  lastName     String
-  username     String   @unique
-  passwordHash String
-  role         String   @default("USER")
-  createdAt    DateTime @default(now())
+  id            String   @id @default(cuid())
+  firstName     String
+  lastName      String
+  username      String   @unique
+  passwordHash  String
+  role          String   @default("USER")
+  createdAt     DateTime @default(now())
+  assignedTasks Task[]   @relation("TaskAssignee")
 }
 ```
 
-| Field | Notes |
-|---|---|
-| `id` | CUID primary key |
-| `username` | Unique. Used for login. |
-| `passwordHash` | Format: `saltHex:hashHex` (PBKDF2-SHA512). See [authentication.md](authentication.md). |
-| `role` | Plain string: `"ADMIN"`, `"USER"`, or `"VIEWER"`. Enforced by application logic, not a DB enum. |
+Notes:
 
-No email field. No sessions table — sessions are managed as stateless cookies.
-
----
+- roles are stored as plain strings
+- `assignedTasks` is the reverse relation for task assignees
+- there is still no session table
 
 ### Board
 
@@ -49,10 +54,6 @@ model Board {
   updatedAt DateTime @updatedAt
 }
 ```
-
-A board is just a title and a list of ordered columns.
-
----
 
 ### Column
 
@@ -69,14 +70,10 @@ model Column {
 }
 ```
 
-| Field | Notes |
-|---|---|
-| `position` | 0-based integer. Columns in a board are ordered by this field. |
-| `boardId` | Foreign key. Cascade delete: deleting the board deletes all its columns. |
+Notes:
 
-**Business rule:** A column cannot be deleted if it has tasks. This is enforced in the `deleteColumn` Server Action (throws an error if `taskCount > 0`), not at the database level.
-
----
+- column ordering is per board via `position`
+- deleting a board cascades to its columns
 
 ### Task
 
@@ -86,25 +83,31 @@ model Task {
   title       String
   description String?
   priority    String        @default("MEDIUM")
+  status      String        @default("NEW")
   position    Int           @default(0)
-  columnId    String
-  column      Column        @relation(fields: [columnId], references: [id], onDelete: Cascade)
+  columnId    String?
+  column      Column?       @relation(fields: [columnId], references: [id], onDelete: SetNull)
+  assigneeId  String?
+  assignee    User?         @relation("TaskAssignee", fields: [assigneeId], references: [id], onDelete: SetNull)
   history     TaskHistory[]
   createdAt   DateTime      @default(now())
   updatedAt   DateTime      @updatedAt
 
   @@index([columnId, position])
+  @@index([assigneeId])
+  @@index([status])
 }
 ```
 
-| Field | Notes |
-|---|---|
-| `description` | Optional. |
-| `priority` | Plain string: `"LOW"`, `"MEDIUM"`, or `"HIGH"`. Default: `"MEDIUM"`. |
-| `position` | 0-based integer within its column. |
-| `columnId` | Foreign key. Cascade delete: deleting the column deletes all its tasks. |
+Important fields:
 
----
+| Field | Meaning |
+|---|---|
+| `priority` | `LOW`, `MEDIUM`, `HIGH` |
+| `status` | `NEW`, `PLANNED`, `DONE`, `REVOKED` |
+| `columnId` | nullable; `null` means backlog-only task |
+| `assigneeId` | nullable task assignee |
+| `position` | ordering within a board column |
 
 ### TaskHistory
 
@@ -122,91 +125,122 @@ model TaskHistory {
 }
 ```
 
-Immutable audit log. Records are created automatically by `createTask` and `updateTask` Server Actions.
+This is an append-only change log for user-visible task changes while the task still exists.
 
-| Field | Notes |
-|---|---|
-| `changeType` | Free-text string: `"Task created"`, `"Title changed"`, `"Description changed"`, `"Priority changed"` |
-| `detail` | Optional context, e.g. `"MEDIUM → HIGH"` for priority changes |
-| `username` | Denormalized — stored as a string, not a foreign key to User. History is preserved even if the user is deleted. |
+It is not a permanent audit trail across task deletion, because `TaskHistory.task` uses `onDelete: Cascade`.
 
----
+Observed change types in the current code include:
+
+- `Task created`
+- `Title changed`
+- `Description changed`
+- `Priority changed`
+- `Status changed`
+- `Assignee set`
+- `Assignee changed`
+- `Assignee removed`
+- `Assigned to board`
+- `Removed from board`
+
+## Delete behavior
+
+This is important because the current schema is no longer a pure downward cascade chain.
+
+### Board deletion
+
+- deleting a `Board` deletes its `Column` rows
+- tasks linked to those columns are **not deleted by the `Task → Column` relation**
+- because `Task.column` uses `onDelete: SetNull`, those tasks become backlog tasks with `columnId = null`
+
+### Column deletion
+
+- deleting a `Column` also sets linked task `columnId` values to `null`
+- however, the application currently blocks deleting a non-empty column in `deleteColumn()`
+
+### User deletion
+
+- deleting a `User` sets `Task.assigneeId` to `null`
+- task history entries remain because they store `username` as denormalized text
+
+### Task deletion
+
+- deleting a `Task` cascades to `TaskHistory`
+- deleting a task therefore removes its history as well
+
+## Board and backlog semantics
+
+The schema intentionally supports both work modes:
+
+- **Backlog task**: `columnId = null`
+- **Board task**: `columnId` points to a column
+
+Server actions use these transitions:
+
+- `assignTaskToBoard()` sets `columnId` to the leftmost board column and `status = "PLANNED"`
+- `unassignTaskFromBoard()` clears `columnId` and resets `status = "NEW"`
+
+Board deletion is different from explicit unassignment. When a board is deleted, linked tasks fall back to `columnId = null` through Prisma's `SetNull` relation, but their status is not reset automatically.
 
 ## Position management
 
-Both `moveTask` and `reorderColumns` use integer-shift transactions — no fractional positions.
+### Column ordering
 
-### Moving a task between columns
+Columns are ordered by integer `position` per board.
 
-```
-1. Decrement position of all tasks in the SOURCE column where position > task.position
-2. Increment position of all tasks in the TARGET column where position >= newPosition
-3. Update the task: set columnId = targetColumnId, position = newPosition
-```
+`reorderColumns()` shifts sibling positions inside a Prisma transaction.
 
-### Moving a task within the same column
+### Task ordering inside a column
 
-```
-Moving DOWN (newPosition > oldPosition):
-  Decrement position of tasks where position > oldPosition AND position <= newPosition
+Board tasks are ordered by integer `position` within a column.
 
-Moving UP (newPosition < oldPosition):
-  Increment position of tasks where position >= newPosition AND position < oldPosition
+`moveTask()` handles:
 
-Update the task: set position = newPosition
-```
+- same-column reorder
+- cross-column move
+- sibling position shifting in both source and target columns
 
-### Reordering columns
+All writes are done transactionally.
 
-Same pattern as within-column task reorder, applied to the `Column` model scoped by `boardId`.
-
-All position updates run inside a `prisma.$transaction` to ensure consistency.
-
----
+Backlog-only tasks do not participate in DnD ordering; they are shown by `createdAt desc` in the tasks view.
 
 ## Migrations
 
-Three migrations under `prisma/migrations/`:
+Current migration set:
 
-| Migration | What it adds |
+| Migration | Purpose |
 |---|---|
-| `20260319214244_init` | Board, Column, Task models |
-| `20260323000000_add_users` | User model |
-| `20260324000000_add_task_history` | TaskHistory model |
+| `20260319214244_init` | Initial board/column/task schema |
+| `20260323000000_add_users` | Users |
+| `20260324000000_add_task_history` | Task history |
+| `20260417000000_add_task_assignee` | Task assignee support |
+| `20260417100000_add_task_status_and_optional_column` | Task status + nullable `columnId` |
 
-**Important:** `prisma migrate deploy` does not support the LibSQL protocol. Migrations are applied by `scripts/migrate-turso.ts`, which reads the SQL files directly and tracks applied migrations in a `_prisma_migrations` table it creates itself. This script runs automatically as part of `npm run build`.
+`prisma migrate deploy` is not used because LibSQL protocol support is missing for that path. Instead, migrations are applied by `scripts/migrate-turso.ts`.
 
-To apply migrations manually:
+## Prisma client setup
 
-```bash
-npm run db:migrate
+The Prisma client is generated to:
+
+```text
+src/generated/prisma/
 ```
 
-To create a new migration after editing `schema.prisma`:
+Key setup files:
 
-```bash
-npx prisma migrate dev --name <name>
-# Commit the generated SQL file in prisma/migrations/
-# On next deploy, npm run build will apply it automatically
-```
+- `prisma/schema.prisma`
+- `src/lib/prisma.ts`
+- `prisma.config.ts`
+- `scripts/migrate-turso.ts`
 
----
+The app uses a Prisma singleton with the LibSQL adapter so Next.js hot reloads do not create unnecessary client instances.
 
-## Prisma client
+## Seed data
 
-The client is generated into `src/generated/prisma/` (configured via `generator client { output = "../src/generated/prisma" }` in `schema.prisma`). This directory is **gitignored** — it must be regenerated on every fresh checkout.
+`prisma/seed.ts` currently:
 
-The singleton lives in `src/lib/prisma.ts`. It wires the LibSQL adapter using environment variables:
+- clears tasks, columns, boards, and users
+- creates the default admin account
+- creates a sample board titled `Project Board`
+- seeds four columns: `Backlog`, `To Do`, `In Progress`, `Done`
 
-```ts
-import { createClient } from "@libsql/client";
-import { PrismaLibSQL } from "@prisma/adapter-libsql";
-
-const client = createClient({
-  url: process.env.TURSO_DATABASE_URL!,
-  authToken: process.env.TURSO_AUTH_TOKEN,
-});
-const adapter = new PrismaLibSQL(client);
-```
-
-Run `npx prisma generate` after any schema change to regenerate the client.
+That seeded board-level `Backlog` column is different from the separate backlog/tasks surface, which is driven by tasks with `columnId = null`.
